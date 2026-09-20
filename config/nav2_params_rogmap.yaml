@@ -1,0 +1,37 @@
+# Nav2 配置文件 - 集成ROG-Map（方案A）
+# 在local_costmap的obstacle_layer中添加ROG-Map作为数据源
+
+local_costmap:
+  local_costmap:
+    ros__parameters:
+      # ... 保留原有配置 ...
+
+      # 添加ROG-Map作为障碍物观测源
+      obstacle_layer:
+        plugin: "nav2_costmap_2d::ObstacleLayer"
+        enabled: True
+        observation_sources: scan rog_map_grid  # 添加rog_map_grid源
+
+        # 原有的激光雷达源（如果有）
+        scan:
+          topic: /scan
+          max_obstacle_height: 2.0
+          clearing: True
+          marking: True
+          data_type: "LaserScan"
+
+        # ROG-Map OccupancyGrid源（新增）
+        rog_map_grid:
+          topic: /rog_map/occupancy_grid
+          data_type: "OccupancyGrid"
+          marking: true                        # 用于标记障碍物
+          clearing: true                       # 用于清除障碍物
+          max_obstacle_height: 2.0             # 最大障碍物高度
+          min_obstacle_height: 0.0             # 最小障碍物高度
+          obstacle_max_range: 15.0             # 最大障碍物范围
+          obstacle_min_range: 0.0              # 最小障碍物范围
+          raytrace_max_range: 15.0             # 射线追踪最大范围
+          raytrace_min_range: 0.0              # 射线追踪最小范围
+
+# 如果需要禁用原有的obstacle_segmentation，可以在这里配置
+# 或者保留两者进行对比测试

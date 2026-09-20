@@ -1,0 +1,285 @@
+<?xml version="1.0"?>
+<root main_tree_to_execute="MainTree">
+    <!-- ////////// -->
+    <BehaviorTree ID="MainTree">
+        <ReactiveSequence>
+            <ForceSuccess>
+                <Action ID="RecordAutoaim"/>
+            </ForceSuccess>
+            <Action ID="SetWhitelist" base="1" engineer="1" hero="1" infantry3="1" infantry4="1" outpost="1" sentry="1"/>
+            <Action ID="SetPatrol" max_pitch="0.0" min_pitch="0.0" mode="0" patrol="0" robot_aim="1" spin="0"/>
+            <Action ID="SendPatrol"/>
+            <Action ID="SendWhitelist"/>
+        </ReactiveSequence>
+    </BehaviorTree>
+    <!-- ////////// -->
+    <TreeNodesModel>
+        <Action ID="BuyBlood"/>
+        <Action ID="BuyBullet"/>
+        <Action ID="BuyBulletInRecovery">
+            <input_port name="number_of_bullet"/>
+        </Action>
+        <Action ID="ChangeMap">
+            <input_port name="map_image">map_image_name</input_port>
+            <input_port name="map_yaml">map_yaml_name</input_port>
+        </Action>
+        <Action ID="ChangeMode"/>
+        <Action ID="ChangePatrolPitch">
+            <input_port name="max_pitch"/>
+            <input_port name="min_pitch"/>
+        </Action>
+        <Action ID="ClearEntireCostmap">
+            <input_port name="server_timeout"/>
+            <input_port name="service_name"/>
+        </Action>
+        <Action ID="ComputePathToPose">
+            <input_port name="goal"/>
+            <output_port name="path"/>
+            <input_port name="planner_id"/>
+            <input_port name="server_name"/>
+            <input_port name="server_timeout"/>
+            <input_port name="start"/>
+        </Action>
+        <Action ID="FollowAim">
+            <output_port default="{goal}" name="goal"/>
+        </Action>
+        <Action ID="FollowPath">
+            <input_port default="FollowPath" name="controller_id"/>
+            <input_port name="goal_checker_id"/>
+            <input_port name="path"/>
+            <input_port name="server_name"/>
+            <input_port name="server_timeout"/>
+        </Action>
+        <Condition ID="ForceMove">
+            <input_port default="1.0" name="force_move_time"/>
+        </Condition>
+        <Action ID="ForceQuitCommand"/>
+        <Action ID="GetOutOfStuck"/>
+        <Condition ID="GoalReached">
+            <input_port name="global_frame">Reference frame</input_port>
+            <input_port name="goal">Destination</input_port>
+            <input_port name="robot_base_frame">Robot base frame</input_port>
+        </Condition>
+        <Condition ID="GoalUpdated"/>
+        <Decorator ID="GoalUpdater">
+            <input_port name="input_goal">Original goal in</input_port>
+            <output_port name="output_goal">Output goal set by subscription</output_port>
+        </Decorator>
+        <Condition ID="IfAllowanceShootLessThanInput">
+            <input_port name="shoot_threshold">shoot threshold for low shoot condition</input_port>
+        </Condition>
+        <Condition ID="IfAppointRobotBloodLessThanInput">
+            <input_port name="Health_threshold"/>
+            <input_port name="RobotName"/>
+            <input_port name="is_our"/>
+        </Condition>
+        <Condition ID="IfAppointRobotInTargetArea">
+            <input_port name="RobotName"/>
+            <input_port name="is_our"/>
+            <input_port name="position_x"/>
+            <input_port name="position_y"/>
+            <input_port name="range_x"/>
+            <input_port name="range_y"/>
+        </Condition>
+        <Condition ID="IfCancelResurrection"/>
+        <Condition ID="IfCoinMoreThanInput">
+            <input_port name="coin_threshold">coin threshold for low coin condition</input_port>
+        </Condition>
+        <Condition ID="IfInChase"/>
+        <Condition ID="IfInCommand"/>
+        <Condition ID="IfInDafuStatus"/>
+        <Condition ID="IfInRamp">
+            <input_port name="global_frame"/>
+            <input_port name="robot_base_frame"/>
+        </Condition>
+        <Condition ID="IfModeChange"/>
+        <Condition ID="IfRecoveryBulletLessThanInput">
+            <input_port name="recovery_bullet_threshold"/>
+        </Condition>
+        <Condition ID="IfRemainTimeInInput">
+            <input_port name="high_time"/>
+            <input_port name="low_time"/>
+        </Condition>
+        <Condition ID="IfRobotRefereeOffline"/>
+        <Condition ID="IfRobotStuck">
+            <input_port name="stuck_threshold_cnt"/>
+            <input_port name="stuck_threshold_distance"/>
+        </Condition>
+        <Condition ID="IfSelectGoFort"/>
+        <Condition ID="IsEnemyDartHit"/>
+        <Condition ID="IsGoalReached">
+            <input_port default="{goal}" name="goal"/>
+        </Condition>
+        <Condition ID="IsGoalUpdate">
+            <input_port default="{goal}" name="goal"/>
+        </Condition>
+        <Condition ID="IsOurDartHit"/>
+        <Condition ID="IsOutFight"/>
+        <Condition ID="IsReceiveMapCommandPose">
+            <input_port default="{goal}" name="goal"/>
+        </Condition>
+        <Condition ID="IsRemainingEnergyLessThanInput"/>
+        <Condition ID="IsRfidInFort"/>
+        <Condition ID="IsRfidInPatrol"/>
+        <Condition ID="IsRfidInRecovery"/>
+        <Condition ID="IsRobotInWeak"/>
+        <Condition ID="IsSentryHurt"/>
+        <Condition ID="IsTunnelDangerous"/>
+        <Action ID="KeepAwayFromObstacles">
+            <input_port default="0.5" name="distance"/>
+            <input_port default="1.0" name="speed"/>
+        </Action>
+        <Action ID="NavigateToPose">
+            <input_port default="{goal}" name="goal">Goal</input_port>
+        </Action>
+        <Control ID="PipelineSequence"/>
+        <Action ID="Printf">
+            <input_port name="txt"/>
+        </Action>
+        <Action ID="RandomMove">
+            <input_port name="random_position_x_1"/>
+            <input_port name="random_position_x_2"/>
+            <input_port name="random_position_x_3"/>
+            <input_port name="random_position_x_4"/>
+            <input_port name="random_position_y_1"/>
+            <input_port name="random_position_y_2"/>
+            <input_port name="random_position_y_3"/>
+            <input_port name="random_position_y_4"/>
+            <output_port default="{goal}" name="randomgoal"/>
+            <input_port default="1.0" name="select_time"/>
+        </Action>
+        <Decorator ID="RateController">
+            <input_port name="hz">Rate</input_port>
+        </Decorator>
+        <Action ID="RecordAutoaim"/>
+        <Action ID="RecordCommandControl">
+            <output_port name="goal"/>
+        </Action>
+        <Action ID="RecordPassingTunnelIndex"/>
+        <Action ID="RecordRobotBlood"/>
+        <Action ID="RecordRobotStatus"/>
+        <Control ID="RecoveryNode">
+            <input_port name="number_of_retries">Number of retries</input_port>
+        </Control>
+        <Action ID="RoutinePatrol">
+            <output_port name="routine_goal"/>
+            <input_port name="routine_position_x_1"/>
+            <input_port name="routine_position_x_2"/>
+            <input_port name="routine_position_y_1"/>
+            <input_port name="routine_position_y_2"/>
+            <input_port name="select_time"/>
+        </Action>
+        <Action ID="SelectResurrection">
+            <input_port name="type_of_resurrection"/>
+        </Action>
+        <Action ID="SendDecision"/>
+        <Action ID="SendPatrol"/>
+        <Action ID="SendSentryInfo"/>
+        <Action ID="SendWhitelist"/>
+        <Action ID="SetAimMode">
+            <input_port name="robot_aim"/>
+        </Action>
+        <Action ID="SetBlackboarduser">
+            <input_port name="key"/>
+            <input_port name="value"/>
+        </Action>
+        <Action ID="SetGimbalPatrol">
+            <input_port name="patrol"/>
+        </Action>
+        <Action ID="SetPatrol">
+            <input_port name="max_pitch"/>
+            <input_port name="min_pitch"/>
+            <input_port name="mode"/>
+            <input_port name="patrol"/>
+            <input_port name="robot_aim"/>
+            <input_port name="spin"/>
+        </Action>
+        <Action ID="SetSentryInfo">
+            <input_port name="info"/>
+        </Action>
+        <Action ID="SetSpin">
+            <input_port name="spin"/>
+        </Action>
+        <Action ID="SetWhitelist">
+            <input_port name="base"/>
+            <input_port name="engineer"/>
+            <input_port name="hero"/>
+            <input_port name="infantry3"/>
+            <input_port name="infantry4"/>
+            <input_port name="outpost"/>
+            <input_port name="sentry"/>
+        </Action>
+        <Action ID="TruncatePath">
+            <input_port default="{path}" name="input_path"/>
+            <input_port default="{truncated_path}" name="output_path"/>
+        </Action>
+        <Action ID="UpdateGoal">
+            <output_port default="{goal}" name="goal"/>
+            <input_port name="position_x"/>
+            <input_port name="position_y"/>
+        </Action>
+        <Action ID="UpdateGoalDafu">
+            <output_port default="{goal}" name="goal"/>
+            <input_port name="position_x"/>
+            <input_port name="position_y"/>
+        </Action>
+        <Decorator ID="UserForceFailure"/>
+        <Decorator ID="UserForceSuccess"/>
+        <Condition ID="WaitForGameStart"/>
+        <Action ID="WaitForInputPeriod">
+            <input_port name="wait_time"/>
+        </Action>
+        <SubTree ID="record_and_send">
+            <input_port default="true" name="__shared_blackboard">If false (default), the Subtree has an isolated blackboard and needs port remapping</input_port>
+        </SubTree>
+        <SubTree ID="中央巡逻">
+            <input_port default="true" name="__shared_blackboard">If false (default), the Subtree has an isolated blackboard and needs port remapping</input_port>
+        </SubTree>
+        <SubTree ID="买弹领弹">
+            <input_port default="true" name="__shared_blackboard">If false (default), the Subtree has an isolated blackboard and needs port remapping</input_port>
+        </SubTree>
+        <SubTree ID="云台手">
+            <input_port default="true" name="__shared_blackboard">If false (default), the Subtree has an isolated blackboard and needs port remapping</input_port>
+        </SubTree>
+        <SubTree ID="到前哨点">
+            <input_port default="true" name="__shared_blackboard">If false (default), the Subtree has an isolated blackboard and needs port remapping</input_port>
+        </SubTree>
+        <SubTree ID="回补给区补血">
+            <input_port default="true" name="__shared_blackboard">If false (default), the Subtree has an isolated blackboard and needs port remapping</input_port>
+        </SubTree>
+        <SubTree ID="复活选择">
+            <input_port default="true" name="__shared_blackboard">If false (default), the Subtree has an isolated blackboard and needs port remapping</input_port>
+        </SubTree>
+        <SubTree ID="守43坡">
+            <input_port default="true" name="__shared_blackboard">If false (default), the Subtree has an isolated blackboard and needs port remapping</input_port>
+        </SubTree>
+        <SubTree ID="守家">
+            <input_port default="true" name="__shared_blackboard">If false (default), the Subtree has an isolated blackboard and needs port remapping</input_port>
+        </SubTree>
+        <SubTree ID="小陀螺控制">
+            <input_port default="true" name="__shared_blackboard">If false (default), the Subtree has an isolated blackboard and needs port remapping</input_port>
+        </SubTree>
+        <SubTree ID="开局后切换为无障碍地图不">
+            <input_port default="true" name="__shared_blackboard">If false (default), the Subtree has an isolated blackboard and needs port remapping</input_port>
+        </SubTree>
+        <SubTree ID="开局打符">
+            <input_port default="true" name="__shared_blackboard">If false (default), the Subtree has an isolated blackboard and needs port remapping</input_port>
+        </SubTree>
+        <SubTree ID="抓英雄">
+            <input_port default="true" name="__shared_blackboard">If false (default), the Subtree has an isolated blackboard and needs port remapping</input_port>
+        </SubTree>
+        <SubTree ID="测试子树">
+            <input_port default="false" name="__shared_blackboard">If false (default), the Subtree has an isolated blackboard and needs port remapping</input_port>
+        </SubTree>
+        <SubTree ID="狗洞有人堵">
+            <input_port default="true" name="__shared_blackboard">If false (default), the Subtree has an isolated blackboard and needs port remapping</input_port>
+        </SubTree>
+        <SubTree ID="脱困">
+            <input_port default="true" name="__shared_blackboard">If false (default), the Subtree has an isolated blackboard and needs port remapping</input_port>
+        </SubTree>
+        <SubTree ID="补血到满">
+            <input_port default="true" name="__shared_blackboard">If false (default), the Subtree has an isolated blackboard and needs port remapping</input_port>
+        </SubTree>
+    </TreeNodesModel>
+    <!-- ////////// -->
+</root>

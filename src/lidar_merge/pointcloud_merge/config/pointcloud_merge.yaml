@@ -1,0 +1,14 @@
+pointcloud_merge_node:
+    ros__parameters:
+        pointcloud_topic_1: "/livox/lidar_192_168_1_187"
+        pointcloud_topic_2: "/livox/lidar_192_168_1_104"
+        OutPut_pointCloud_topic: "/livox/lidar"
+        transformLidarOne2CenterMaxtrix: [1, 0, 0, 0,
+                                          0, 1, 0, 0,
+                                          0, 0, 1, 0,
+                                          0, 0, 0, 1]
+
+        transformLidarTwo2CenterMaxtrix: [1, 0, 0, 0,
+                                          0, 1, 0, 0,
+                                          0, 0, 1, 0,
+                                          0, 0, 0, 1]

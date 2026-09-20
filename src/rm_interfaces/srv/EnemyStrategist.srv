@@ -1,0 +1,6 @@
+std_msgs/Header header
+EnemyPositions all_enemy
+---
+int8 err_code # 0: 一切正常，听自瞄的（不启用id）；1: 强制追踪某个目标（启用id）；2：当前关闭自瞄
+string id
+EnemyPosition position

@@ -1,0 +1,99 @@
+<?xml version="1.0"?>
+<root main_tree_to_execute="BehaviorTree">
+    <!-- ////////// -->
+    <BehaviorTree ID="BehaviorTree">
+        <ReactiveSequence>
+            <Condition ID="RecordSentryStatus"/>
+            <IfThenElse>
+                <Condition ID="IfOutpostHpLessThanInput" health_threshold="100"/>
+                <IfThenElse>
+                    <Condition ID="IfBaseShieldLessThanInput" shield_threshold="0"/>
+                    <ReactiveFallback>
+                        <Condition ID="IsRfidInPatrol"/>
+                        <ForceSuccess>
+                            <Action ID="NavigateToPose" goal=""/>
+                        </ForceSuccess>
+                    </ReactiveFallback>
+                    <AlwaysSuccess/>
+                </IfThenElse>
+                <IfThenElse>
+                    <Condition ID="IfHealthLessThanInput" health_threshold="100"/>
+                    <IfThenElse>
+                        <Condition ID="IfCoinMoreThanInput" coin_threshold="200"/>
+                        <Sequence>
+                            <ReactiveFallback>
+                                <Condition ID="IsOutFight"/>
+                            </ReactiveFallback>
+                            <Action ID="BuyBlood"/>
+                        </Sequence>
+                        <Sequence>
+                            <ReactiveFallback>
+                                <Condition ID="IsRfidInRecovery"/>
+                                <ForceSuccess>
+                                    <Action ID="NavigateToPose" goal=""/>
+                                </ForceSuccess>
+                            </ReactiveFallback>
+                            <Condition ID="IfHealthMoreThanInput" health_threshold="100"/>
+                        </Sequence>
+                    </IfThenElse>
+                    <IfThenElse>
+                        <Condition ID="IfAllowanceShootLessThanInput" shoot_threshold="50"/>
+                        <IfThenElse>
+                            <Condition ID="IfCoinMoreThanInput" coin_threshold="200"/>
+                            <Action ID="BuyBullet"/>
+                            <Sequence>
+                                <ReactiveFallback>
+                                    <Condition ID="IsRfidInPatrol"/>
+                                    <ForceSuccess>
+                                        <Action ID="NavigateToPose" goal=""/>
+                                    </ForceSuccess>
+                                </ReactiveFallback>
+                                <Action ID="BuyBullet"/>
+                            </Sequence>
+                        </IfThenElse>
+                        <AlwaysSuccess/>
+                    </IfThenElse>
+                </IfThenElse>
+            </IfThenElse>
+        </ReactiveSequence>
+    </BehaviorTree>
+    <!-- ////////// -->
+    <TreeNodesModel>
+        <Action ID="BuyBlood"/>
+        <Action ID="BuyBullet"/>
+        <Condition ID="GoalReached">
+            <input_port name="global_frame">Reference frame</input_port>
+            <input_port name="goal">Destination</input_port>
+            <input_port name="robot_base_frame">Robot base frame</input_port>
+        </Condition>
+        <Condition ID="IfAllowanceShootLessThanInput">
+            <input_port name="shoot_threshold">shoot threshold for low shoot condition</input_port>
+        </Condition>
+        <Condition ID="IfBaseShieldLessThanInput">
+            <input_port name="shield_threshold">Shield threshold for low health condition</input_port>
+        </Condition>
+        <Condition ID="IfCoinMoreThanInput">
+            <input_port name="coin_threshold">coin threshold for low coin condition</input_port>
+        </Condition>
+        <Condition ID="IfHealthLessThanInput">
+            <input_port name="health_threshold">Health threshold for low health condition</input_port>
+        </Condition>
+        <Condition ID="IfHealthMoreThanInput">
+            <input_port name="health_threshold">Health threshold for low health condition</input_port>
+        </Condition>
+        <Condition ID="IfOutpostHpLessThanInput">
+            <input_port name="health_threshold">Health threshold for low health condition</input_port>
+        </Condition>
+        <Condition ID="IsOutFight"/>
+        <Condition ID="IsRfidInPatrol"/>
+        <Condition ID="IsRfidInRecovery"/>
+        <Action ID="NavigateToPose">
+            <input_port name="goal">Goal</input_port>
+        </Action>
+        <Condition ID="RecordRobotBlood">
+            <input_port name="record_time">record_time</input_port>
+        </Condition>
+        <Condition ID="RecordSentryStatus"/>
+    </TreeNodesModel>
+    <!-- ////////// -->
+</root>

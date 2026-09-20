@@ -1,0 +1,246 @@
+<?xml version="1.0"?>
+<root main_tree_to_execute="MainTree">
+    <!-- ////////// -->
+    <BehaviorTree ID="MainTree">
+        <ReactiveSequence>
+            <Condition ID="WaitForGameStart"/>
+            <ForceSuccess>
+                <Action ID="RecordRobotBlood"/>
+            </ForceSuccess>
+            <ForceSuccess>
+                <Action ID="RecordRobotStatus"/>
+            </ForceSuccess>
+            <ForceSuccess>
+                <Action ID="RecordCommandControl" goal="{goal]"/>
+            </ForceSuccess>
+            <Decorator ID="UserForceSuccess">
+                <ReactiveFallback>
+                    <Condition ID="GoalUpdated"/>
+                    <Action ID="NavigateToPose" goal="{goal}"/>
+                </ReactiveFallback>
+            </Decorator>
+            <Inverter>
+                <ReactiveSequence>
+                    <Condition ID="IsRfidInRecovery"/>
+                    <Condition Health_threshold="399" ID="IfAppointRobotBloodLessThanInput" RobotName="7" is_our="1"/>
+                    <Action ID="UpdateGoal" goal="{goal}" name="补给区" position_x="0.0" position_y="0.0"/>
+                </ReactiveSequence>
+            </Inverter>
+            <Decorator ID="UserForceSuccess">
+                <ReactiveFallback>
+                    <ReactiveSequence>
+                        <Condition ID="IfInCommand"/>
+                        <Decorator ID="UserForceSuccess">
+                            <Switch3 case_1="G" case_2="T" case_3="B" variable="{cmd_keyboard}">
+                                <Action ID="Printf" txt="云台手指令---G"/>
+                                <ReactiveSequence>
+                                    <Action ID="Printf" txt="云台手指令---T"/>
+                                    <Action ID="SendDecision"/>
+                                </ReactiveSequence>
+                                <ReactiveSequence>
+                                    <Action ID="Printf" txt="云台手指令---B"/>
+                                    <Action ID="UpdateGoal" goal="{goal}" name="补给区" position_x="0.0" position_y="0.0"/>
+                                    <Condition ID="IsGoalReached" goal="{goal}"/>
+                                    <Action ID="ForceQuitCommand"/>
+                                </ReactiveSequence>
+                                <Action ID="Printf" txt="云台手其他指令执行中"/>
+                            </Switch3>
+                        </Decorator>
+                    </ReactiveSequence>
+                    <Action ID="UpdateGoal" goal="{goal}" name="测试用目标点" position_x="-0.18" position_y="4.02"/>
+                </ReactiveFallback>
+            </Decorator>
+        </ReactiveSequence>
+    </BehaviorTree>
+    <!-- ////////// -->
+    <TreeNodesModel>
+        <Action ID="BuyBlood"/>
+        <Action ID="BuyBullet"/>
+        <Action ID="BuyBulletInRecovery">
+            <input_port name="number_of_bullet"/>
+        </Action>
+        <Action ID="ChangeMap">
+            <input_port name="map_image">map_image_name</input_port>
+            <input_port name="map_yaml">map_yaml_name</input_port>
+        </Action>
+        <Action ID="ChangeMode">
+            <input_port name="decision_mode">decision mode</input_port>
+        </Action>
+        <Action ID="ClearEntireCostmap">
+            <input_port name="server_timeout"/>
+            <input_port name="service_name"/>
+        </Action>
+        <Action ID="ComputePathToPose">
+            <input_port name="goal"/>
+            <output_port name="path"/>
+            <input_port name="planner_id"/>
+            <input_port name="server_name"/>
+            <input_port name="server_timeout"/>
+            <input_port name="start"/>
+        </Action>
+        <Action ID="FollowPath">
+            <input_port default="FollowPath" name="controller_id"/>
+            <input_port name="goal_checker_id"/>
+            <input_port name="path"/>
+            <input_port name="server_name"/>
+            <input_port name="server_timeout"/>
+        </Action>
+        <Condition ID="ForceMove">
+            <input_port default="1.0" name="force_move_time"/>
+        </Condition>
+        <Action ID="ForceQuitCommand"/>
+        <Condition ID="GoalReached">
+            <input_port name="global_frame">Reference frame</input_port>
+            <input_port name="goal">Destination</input_port>
+            <input_port name="robot_base_frame">Robot base frame</input_port>
+        </Condition>
+        <Condition ID="GoalUpdated"/>
+        <Decorator ID="GoalUpdater">
+            <input_port name="input_goal">Original goal in</input_port>
+            <output_port name="output_goal">Output goal set by subscription</output_port>
+        </Decorator>
+        <Condition ID="IfAllowanceShootLessThanInput">
+            <input_port name="shoot_threshold">shoot threshold for low shoot condition</input_port>
+        </Condition>
+        <Condition ID="IfAppointRobotBloodLessThanInput">
+            <input_port name="Health_threshold"/>
+            <input_port name="RobotName"/>
+            <input_port name="is_our"/>
+        </Condition>
+        <Condition ID="IfAppointRobotInTargetArea">
+            <input_port name="RobotName"/>
+            <input_port name="is_our"/>
+            <input_port name="position_x"/>
+            <input_port name="position_y"/>
+            <input_port name="range_x"/>
+            <input_port name="range_y"/>
+        </Condition>
+        <Condition ID="IfCancelResurrection"/>
+        <Condition ID="IfCoinMoreThanInput">
+            <input_port name="coin_threshold">coin threshold for low coin condition</input_port>
+        </Condition>
+        <Condition ID="IfInCommand"/>
+        <Condition ID="IfInRamp">
+            <input_port name="global_frame"/>
+            <input_port name="robot_base_frame"/>
+        </Condition>
+        <Condition ID="IfModeChange"/>
+        <Condition ID="IfRecoveryBulletLessThanInput">
+            <input_port name="recovery_bullet_threshold"/>
+        </Condition>
+        <Condition ID="IfRemainTimeInInput">
+            <input_port name="high_time"/>
+            <input_port name="low_time"/>
+        </Condition>
+        <Condition ID="IfSelectGoFort"/>
+        <Condition ID="IsEnemyDartHit"/>
+        <Condition ID="IsGoalReached">
+            <input_port default="{goal}" name="goal"/>
+        </Condition>
+        <Condition ID="IsGoalUpdate">
+            <input_port default="{goal}" name="goal"/>
+        </Condition>
+        <Condition ID="IsOurDartHit"/>
+        <Condition ID="IsOutFight"/>
+        <Condition ID="IsReceiveMapCommandPose">
+            <input_port default="{goal}" name="goal"/>
+        </Condition>
+        <Condition ID="IsRemainingEnergyLessThanInput"/>
+        <Condition ID="IsRfidInFort"/>
+        <Condition ID="IsRfidInPatrol"/>
+        <Condition ID="IsRfidInRecovery"/>
+        <Condition ID="IsSentryHurt"/>
+        <Condition ID="IsTunnelDangerous">
+            <input_port name="tunnel_index"/>
+        </Condition>
+        <Action ID="KeepAwayFromObstacles">
+            <input_port default="0.5" name="distance"/>
+            <input_port default="1.0" name="speed"/>
+        </Action>
+        <Action ID="NavigateToPose">
+            <input_port default="{goal}" name="goal">Goal</input_port>
+        </Action>
+        <Control ID="PipelineSequence"/>
+        <Action ID="Printf">
+            <input_port name="txt"/>
+        </Action>
+        <Action ID="RandomMove">
+            <input_port name="random_position_x_1"/>
+            <input_port name="random_position_x_2"/>
+            <input_port name="random_position_x_3"/>
+            <input_port name="random_position_x_4"/>
+            <input_port name="random_position_y_1"/>
+            <input_port name="random_position_y_2"/>
+            <input_port name="random_position_y_3"/>
+            <input_port name="random_position_y_4"/>
+            <output_port default="{goal}" name="randomgoal"/>
+            <input_port default="1.0" name="select_time"/>
+        </Action>
+        <Decorator ID="RateController">
+            <input_port name="hz">Rate</input_port>
+        </Decorator>
+        <Action ID="RecordCommandControl">
+            <output_port default="{goal]" name="goal"/>
+        </Action>
+        <Action ID="RecordRobotBlood"/>
+        <Action ID="RecordRobotStatus"/>
+        <Control ID="RecoveryNode">
+            <input_port name="number_of_retries">Number of retries</input_port>
+        </Control>
+        <Action ID="RoutinePatrol">
+            <output_port name="routine_goal"/>
+            <input_port name="routine_position_x_1"/>
+            <input_port name="routine_position_x_2"/>
+            <input_port name="routine_position_y_1"/>
+            <input_port name="routine_position_y_2"/>
+            <input_port name="select_time"/>
+        </Action>
+        <Action ID="SelectResurrection">
+            <input_port name="type_of_resurrection"/>
+        </Action>
+        <Action ID="SendDecision"/>
+        <Action ID="SendPatrol"/>
+        <Action ID="SendSentryInfo"/>
+        <Action ID="SendWhitelist"/>
+        <Action ID="SetBlackboarduser">
+            <input_port name="key"/>
+            <input_port name="value"/>
+        </Action>
+        <Action ID="SetPatrol">
+            <input_port name="max_pitch"/>
+            <input_port name="min_pitch"/>
+            <input_port name="mode"/>
+            <input_port name="patrol"/>
+            <input_port name="robot_aim"/>
+            <input_port name="spin"/>
+        </Action>
+        <Action ID="SetSentryInfo">
+            <input_port name="info"/>
+        </Action>
+        <Action ID="SetWhitelist">
+            <input_port name="base"/>
+            <input_port name="engineer"/>
+            <input_port name="hero"/>
+            <input_port name="infantry3"/>
+            <input_port name="infantry4"/>
+            <input_port name="outpost"/>
+            <input_port name="sentry"/>
+        </Action>
+        <Action ID="TruncatePath">
+            <input_port default="{path}" name="input_path"/>
+            <input_port default="{truncated_path}" name="output_path"/>
+        </Action>
+        <Action ID="UpdateGoal">
+            <output_port default="{goal}" name="goal"/>
+            <input_port name="position_x"/>
+            <input_port name="position_y"/>
+        </Action>
+        <Decorator ID="UserForceFailure"/>
+        <Decorator ID="UserForceSuccess"/>
+        <Condition ID="WaitForGameStart"/>
+        <Action ID="WaitForInputPeriod">
+            <input_port name="wait_time"/>
+        </Action>
+    </TreeNodesModel>
+    <!-- ////////// -->
+</root>

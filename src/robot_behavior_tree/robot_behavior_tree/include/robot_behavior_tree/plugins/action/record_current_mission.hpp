@@ -1,0 +1,8 @@
+//
+// Created by elsa on 25-4-19.
+//
+
+#ifndef RECORD_CURRENT_MISSION_HPP
+#define RECORD_CURRENT_MISSION_HPP
+
+#endif //RECORD_CURRENT_MISSION_HPP

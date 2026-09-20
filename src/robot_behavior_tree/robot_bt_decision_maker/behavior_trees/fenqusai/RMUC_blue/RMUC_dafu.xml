@@ -1,0 +1,408 @@
+<?xml version="1.0"?>
+<root main_tree_to_execute="BehaviorTree">
+    <!-- ////////// -->
+    <BehaviorTree ID="BehaviorTree">
+        <ReactiveSequence name="ReactivSequence">
+            <Condition ID="WaitForGameStart"/>
+            <ForceSuccess>
+                <Action ID="RecordRobotBlood"/>
+            </ForceSuccess>
+            <ForceSuccess>
+                <Action ID="RecordRobotStatus"/>
+            </ForceSuccess>
+            <ForceSuccess>
+                <Action ID="RecordPassingTunnelIndex"/>
+            </ForceSuccess>
+            <ForceSuccess>
+                <Action ID="RecordCommandControl" goal="{goal}"/>
+            </ForceSuccess>
+            <ForceSuccess>
+                <Action ID="SendWhitelist"/>
+            </ForceSuccess>
+            <ForceSuccess>
+                <Action ID="SendDecision"/>
+            </ForceSuccess>
+            <ForceSuccess>
+                <Action ID="SendPatrol"/>
+            </ForceSuccess>
+            <ForceSuccess>
+                <Action ID="ChangeMode"/>
+            </ForceSuccess>
+            <ForceSuccess>
+                <Action ID="SendSentryInfo"/>
+            </ForceSuccess>
+            <Decorator ID="UserForceSuccess">
+                <ReactiveFallback>
+                    <Condition ID="IsGoalUpdate" goal="{goal}"/>
+                    <Action ID="NavigateToPose" goal="{goal}"/>
+                </ReactiveFallback>
+            </Decorator>
+            <Inverter>
+                <ReactiveFallback name="紧急情况">
+                    <ReactiveSequence name="裁判系统模块离线">
+                        <Condition ID="IfRobotRefereeOffline"/>
+                        <Action ID="UpdateGoal" goal="{goal}" name="补给区" position_x="-3.2" position_y="-0.6"/>
+                        <Action ID="SetWhitelist" base="0" engineer="0" hero="0" infantry3="0" infantry4="0" outpost="0" sentry="0"/>
+                        <Action ID="SetPatrol" max_pitch="0.2" min_pitch="-0.1" mode="0" patrol="0" robot_aim="0" spin="0"/>
+                    </ReactiveSequence>
+                    <ReactiveSequence name="机器人卡住判断">
+                        <Inverter name="只在导航时判断">
+                            <Condition ID="IsGoalReached" goal="{goal}"/>
+                        </Inverter>
+                        <Condition ID="IfRobotStuck" stuck_threshold_cnt="5" stuck_threshold_distance="0.04"/>
+                        <ReactiveSequence name="脱困处理">
+                            <Action ID="SetSentryInfo" info="卡住了在脱困"/>
+                            <Action ID="GetOutOfStuck"/>
+                            <Condition ID="ForceMove" force_move_time="1.0"/>
+                        </ReactiveSequence>
+                    </ReactiveSequence>
+                    <ReactiveSequence name="狗洞有人堵">
+                        <Condition ID="IsTunnelDangerous"/>
+                        <Switch4 case_1="1" case_2="2" case_3="3" case_4="4" variable="{tunnel_related_map}">
+                            <Action ID="ChangeMap" map_image="/home/tc/Desktop/auto_sentry2025/src/auto_sentry2025/robot_bring_up/maps/2025_05_26_14_30_21_1.png" map_yaml="/home/tc/Desktop/auto_sentry2025/src/auto_sentry2025/robot_bring_up/maps/2025_05_26_14_30_21_1.yaml"/>
+                            <Action ID="ChangeMap" map_image="/home/tc/Desktop/auto_sentry2025/src/auto_sentry2025/robot_bring_up/maps/2025_05_26_14_30_21_1.png" map_yaml="/home/tc/Desktop/auto_sentry2025/src/auto_sentry2025/robot_bring_up/maps/2025_05_26_14_30_21_1.yaml"/>
+                            <Action ID="ChangeMap" map_image="/home/tc/Desktop/auto_sentry2025/src/auto_sentry2025/robot_bring_up/maps/2025_05_26_14_30_21_1.png" map_yaml="/home/tc/Desktop/auto_sentry2025/src/auto_sentry2025/robot_bring_up/maps/2025_05_26_14_30_21_1.yaml"/>
+                            <Action ID="ChangeMap" map_image="/home/tc/Desktop/auto_sentry2025/src/auto_sentry2025/robot_bring_up/maps/2025_05_26_14_30_21_1.png" map_yaml="/home/tc/Desktop/auto_sentry2025/src/auto_sentry2025/robot_bring_up/maps/2025_05_26_14_30_21_1.yaml"/>
+                            <Action ID="ChangeMap" map_image="/home/tc/Desktop/auto_sentry2025/src/auto_sentry2025/robot_bring_up/maps/2025_05_26_14_30_21_1.png" map_yaml="/home/tc/Desktop/auto_sentry2025/src/auto_sentry2025/robot_bring_up/maps/2025_05_26_14_30_21_1.yaml"/>
+                        </Switch4>
+                    </ReactiveSequence>
+                    <ReactiveSequence name="导航切换模式">
+                        <Condition ID="IfModeChange"/>
+                        <Action ID="WaitForInputPeriod" wait_time="0.5"/>
+                    </ReactiveSequence>
+                </ReactiveFallback>
+            </Inverter>
+            <ForceSuccess>
+                <ReactiveSequence name="开放前哨狗洞路径">
+                    <Condition ID="IfRemainTimeInInput" high_time="400" low_time="398"/>
+                    <Action ID="ChangeMap" map_image="/home/tc/Desktop/auto_sentry2025/src/auto_sentry2025/robot_bring_up/maps/2025_05_26_14_30_21_1.png" map_yaml="/home/tc/Desktop/auto_sentry2025/src/auto_sentry2025/robot_bring_up/maps/2025_05_26_14_30_21_1.yaml"/>
+                </ReactiveSequence>
+            </ForceSuccess>
+            <Inverter>
+                <ReactiveSequence name="在补给区补满血">
+                    <Condition ID="IsRfidInRecovery"/>
+                    <IfThenElse>
+                        <Condition Health_threshold="399" ID="IfAppointRobotBloodLessThanInput" RobotName="7" is_our="1"/>
+                        <Action ID="UpdateGoal" goal="{goal}" name="留在补给区" position_x="-3.2" position_y="-0.6"/>
+                        <Inverter>
+                            <Action ID="SetSentryInfo" info="哨兵补血完成" name=""/>
+                        </Inverter>
+                    </IfThenElse>
+                </ReactiveSequence>
+            </Inverter>
+            <ForceSuccess>
+                <IfThenElse name="选择复活方式">
+                    <Condition Health_threshold="0" ID="IfAppointRobotBloodLessThanInput" RobotName="7" is_our="1"/>
+                    <IfThenElse>
+                        <Condition ID="IfCoinMoreThanInput" coin_threshold="800"/>
+                        <Action ID="SelectResurrection" type_of_resurrection="3"/>
+                        <Action ID="SelectResurrection" type_of_resurrection="2"/>
+                    </IfThenElse>
+                    <Action ID="SelectResurrection" type_of_resurrection="0"/>
+                </IfThenElse>
+            </ForceSuccess>
+            <ForceSuccess>
+                <IfThenElse name="Action控制">
+                    <Condition Health_threshold="250" ID="IfAppointRobotBloodLessThanInput" RobotName="7" is_our="1" name="小于250血持续小陀螺"/>
+                    <Action ID="SetSpin" name="持续开小陀螺" spin="1"/>
+                    <IfThenElse name="平时是否脱战">
+                        <ReactiveFallback>
+                            <Condition ID="IsSentryHurt"/>
+                            <Inverter>
+                                <Condition ID="IsOutFight"/>
+                            </Inverter>
+                        </ReactiveFallback>
+                        <Action ID="SetSpin" name="开小陀螺" spin="1"/>
+                        <Action ID="SetSpin" name="不小陀螺" spin="0"/>
+                    </IfThenElse>
+                </IfThenElse>
+            </ForceSuccess>
+            <Decorator ID="UserForceSuccess">
+                <ReactiveFallback name="一般任务执行">
+                    <ReactiveSequence name="云台手长时间控制">
+                        <Condition ID="IfInCommand"/>
+                        <Switch2 case_1="B" case_2="Y" variable="{cmd_keyboard}">
+                            <ReactiveSequence name="一键回家补血">
+                                <Action ID="SetSentryInfo" info="云台手指令B" name=""/>
+                                <Action ID="Printf" txt="云台手指令---B"/>
+                                <Action ID="UpdateGoal" goal="{goal}" name="补给区" position_x="-3.2" position_y="-0.6"/>
+                                <Action ID="SetPatrol" max_pitch="0.2" min_pitch="-0.1" mode="1" patrol="0" robot_aim="0" spin="1"/>
+                            </ReactiveSequence>
+                            <Action ID="SetSentryInfo" info="云台手指令---退出云台手控制"/>
+                            <Action ID="SetSentryInfo" info="云台手指令---定点导航"/>
+                        </Switch2>
+                    </ReactiveSequence>
+                    <ReactiveSequence name="回补给区/买血">
+                        <Condition Health_threshold="120" ID="IfAppointRobotBloodLessThanInput" RobotName="7" is_our="1"/>
+                        <Action ID="SetSentryInfo" info="回补给区/买血" name=""/>
+                        <IfThenElse>
+                            <ReactiveSequence>
+                                <Condition Health_threshold="50" ID="IfAppointRobotBloodLessThanInput" RobotName="7" is_our="1"/>
+                                <Condition ID="IfCoinMoreThanInput" coin_threshold="700"/>
+                                <Condition ID="IsOutFight"/>
+                            </ReactiveSequence>
+                            <Action ID="BuyBlood"/>
+                            <Action ID="UpdateGoal" goal="{goal}" name="补给区" position_x="-3.2" position_y="-0.6"/>
+                        </IfThenElse>
+                    </ReactiveSequence>
+                    <ReactiveSequence name="买弹/领弹">
+                        <Condition ID="IfAllowanceShootLessThanInput" shoot_threshold="0"/>
+                        <Action ID="SetSentryInfo" info="买弹/领弹" name=""/>
+                        <IfThenElse>
+                            <Inverter>
+                                <Condition ID="IfRecoveryBulletLessThanInput" name="没有免费发弹量可领" recovery_bullet_threshold="100"/>
+                            </Inverter>
+                            <Action ID="UpdateGoal" goal="{goal}" name="补给区" position_x="-3.2" position_y="-0.6"/>
+                            <IfThenElse>
+                                <ReactiveSequence>
+                                    <Condition ID="IfCoinMoreThanInput" coin_threshold="700"/>
+                                    <Condition ID="IsOutFight"/>
+                                </ReactiveSequence>
+                                <Action ID="BuyBullet"/>
+                                <ReactiveSequence>
+                                    <Action ID="UpdateGoal" goal="{goal}" name="补给区" position_x="-3.2" position_y="-0.6"/>
+                                    <Condition ID="IfCoinMoreThanInput" coin_threshold="200"/>
+                                    <Action ID="BuyBulletInRecovery" number_of_bullet="80"/>
+                                </ReactiveSequence>
+                            </IfThenElse>
+                        </IfThenElse>
+                    </ReactiveSequence>
+                    <ReactiveSequence name="开局打符">
+                        <Condition ID="IfRemainTimeInInput" high_time="420" low_time="405"/>
+                        <Action ID="SetSentryInfo" info="开局打符" name=""/>
+                        <Action ID="UpdateGoal" goal="{goal}" name="打符地方" position_x="-4.6" position_y="-2"/>
+                        <Action ID="SetPatrol" max_pitch="0.6" min_pitch="0.2" mode="0" name="aim为2,打符" patrol="1" robot_aim="2" spin="0"/>
+                    </ReactiveSequence>
+                    <ReactiveSequence name="开局打前哨站">
+                        <Condition ID="IfRemainTimeInInput" high_time="420" low_time="380"/>
+                        <Inverter>
+                            <Condition Health_threshold="0" ID="IfAppointRobotBloodLessThanInput" RobotName="8" is_our="0"/>
+                        </Inverter>
+                        <Action ID="SetSentryInfo" info="打前哨站" name=""/>
+                        <Action ID="UpdateGoal" goal="{goal}" name="前哨站" position_x="-4.6" position_y="-2"/>
+                        <Action ID="SetWhitelist" base="0" engineer="1" hero="1" infantry3="1" infantry4="1" outpost="1" sentry="1"/>
+                        <Action ID="SetPatrol" max_pitch="0.6" min_pitch="-0.1" mode="0" name="Sis_hurtetPatrol" patrol="1" robot_aim="1" spin="0"/>
+                    </ReactiveSequence>
+                    <ReactiveSequence name="四处巡逻">
+                        <Inverter>
+                            <Condition ID="IsRobotInWeak"/>
+                        </Inverter>
+                        <Action ID="SetSentryInfo" info="四处巡逻" name=""/>
+                        <Action ID="RoutinePatrol" routine_goal="{goal}" routine_position_x_1="-3.2" routine_position_x_2="-4.6" routine_position_y_1="-0.6" routine_position_y_2="-2" select_time="25"/>
+                        <Action ID="SetWhitelist" base="0" engineer="1" hero="1" infantry3="1" infantry4="1" outpost="0" sentry="1"/>
+                        <Action ID="SetPatrol" max_pitch="0.2" min_pitch="-0.4" mode="0" patrol="1" robot_aim="1" spin="0"/>
+                    </ReactiveSequence>
+                    <ReactiveSequence name="待在家里">
+                        <Action ID="UpdateGoal" goal="{goal}" name="普通点" position_x="-4.6" position_y="-2"/>
+                        <Action ID="SetWhitelist" base="0" engineer="0" hero="1" infantry3="1" infantry4="1" outpost="0" sentry="0"/>
+                        <Action ID="SetPatrol" max_pitch="0.2" min_pitch="-0.4" mode="0" patrol="1" robot_aim="1" spin="0"/>
+                        <Action ID="SetSentryInfo" info="待在家里" name=""/>
+                    </ReactiveSequence>
+                </ReactiveFallback>
+            </Decorator>
+        </ReactiveSequence>
+    </BehaviorTree>
+    <!-- ////////// -->
+    <TreeNodesModel>
+        <Action ID="BuyBlood"/>
+        <Action ID="BuyBullet"/>
+        <Action ID="BuyBulletInRecovery">
+            <input_port name="number_of_bullet"/>
+        </Action>
+        <Action ID="ChangeMap">
+            <input_port name="map_image">map_image_name</input_port>
+            <input_port name="map_yaml">map_yaml_name</input_port>
+        </Action>
+        <Action ID="ChangeMode"/>
+        <Action ID="ChangePatrolPitch">
+            <input_port name="max_pitch"/>
+            <input_port name="min_pitch"/>
+        </Action>
+        <Action ID="ClearEntireCostmap">
+            <input_port name="server_timeout"/>
+            <input_port name="service_name"/>
+        </Action>
+        <Action ID="ComputePathToPose">
+            <input_port name="goal"/>
+            <output_port name="path"/>
+            <input_port name="planner_id"/>
+            <input_port name="server_name"/>
+            <input_port name="server_timeout"/>
+            <input_port name="start"/>
+        </Action>
+        <Action ID="FollowPath">
+            <input_port default="FollowPath" name="controller_id"/>
+            <input_port name="goal_checker_id"/>
+            <input_port name="path"/>
+            <input_port name="server_name"/>
+            <input_port name="server_timeout"/>
+        </Action>
+        <Condition ID="ForceMove">
+            <input_port default="1.0" name="force_move_time"/>
+        </Condition>
+        <Action ID="ForceQuitCommand"/>
+        <Action ID="GetOutOfStuck"/>
+        <Condition ID="GoalReached">
+            <input_port name="global_frame">Reference frame</input_port>
+            <input_port name="goal">Destination</input_port>
+            <input_port name="robot_base_frame">Robot base frame</input_port>
+        </Condition>
+        <Condition ID="GoalUpdated"/>
+        <Decorator ID="GoalUpdater">
+            <input_port name="input_goal">Original goal in</input_port>
+            <output_port name="output_goal">Output goal set by subscription</output_port>
+        </Decorator>
+        <Condition ID="IfAllowanceShootLessThanInput">
+            <input_port name="shoot_threshold">shoot threshold for low shoot condition</input_port>
+        </Condition>
+        <Condition ID="IfAppointRobotBloodLessThanInput">
+            <input_port name="Health_threshold"/>
+            <input_port name="RobotName"/>
+            <input_port name="is_our"/>
+        </Condition>
+        <Condition ID="IfAppointRobotInTargetArea">
+            <input_port name="RobotName"/>
+            <input_port name="is_our"/>
+            <input_port name="position_x"/>
+            <input_port name="position_y"/>
+            <input_port name="range_x"/>
+            <input_port name="range_y"/>
+        </Condition>
+        <Condition ID="IfCancelResurrection"/>
+        <Condition ID="IfCoinMoreThanInput">
+            <input_port name="coin_threshold">coin threshold for low coin condition</input_port>
+        </Condition>
+        <Condition ID="IfInCommand"/>
+        <Condition ID="IfInRamp">
+            <input_port name="global_frame"/>
+            <input_port name="robot_base_frame"/>
+        </Condition>
+        <Condition ID="IfModeChange"/>
+        <Condition ID="IfRecoveryBulletLessThanInput">
+            <input_port name="recovery_bullet_threshold"/>
+        </Condition>
+        <Condition ID="IfRemainTimeInInput">
+            <input_port name="high_time"/>
+            <input_port name="low_time"/>
+        </Condition>
+        <Condition ID="IfRobotRefereeOffline"/>
+        <Condition ID="IfRobotStuck">
+            <input_port name="stuck_threshold_cnt"/>
+            <input_port name="stuck_threshold_distance"/>
+        </Condition>
+        <Condition ID="IfSelectGoFort"/>
+        <Condition ID="IsEnemyDartHit"/>
+        <Condition ID="IsGoalReached">
+            <input_port default="{goal}" name="goal"/>
+        </Condition>
+        <Condition ID="IsGoalUpdate">
+            <input_port default="{goal}" name="goal"/>
+        </Condition>
+        <Condition ID="IsOurDartHit"/>
+        <Condition ID="IsOutFight"/>
+        <Condition ID="IsReceiveMapCommandPose">
+            <input_port default="{goal}" name="goal"/>
+        </Condition>
+        <Condition ID="IsRfidInFort"/>
+        <Condition ID="IsRfidInRecovery"/>
+        <Condition ID="IsRobotInWeak"/>
+        <Condition ID="IsSentryHurt"/>
+        <Condition ID="IsTunnelDangerous"/>
+        <Action ID="KeepAwayFromObstacles">
+            <input_port default="0.5" name="distance"/>
+            <input_port default="1.0" name="speed"/>
+        </Action>
+        <Action ID="NavigateToPose">
+            <input_port default="{goal}" name="goal">Goal</input_port>
+        </Action>
+        <Control ID="PipelineSequence"/>
+        <Action ID="Printf">
+            <input_port name="txt"/>
+        </Action>
+        <Action ID="RandomMove">
+            <input_port name="random_position_x_1"/>
+            <input_port name="random_position_x_2"/>
+            <input_port name="random_position_x_3"/>
+            <input_port name="random_position_x_4"/>
+            <input_port name="random_position_y_1"/>
+            <input_port name="random_position_y_2"/>
+            <input_port name="random_position_y_3"/>
+            <input_port name="random_position_y_4"/>
+            <output_port default="{goal}" name="randomgoal"/>
+            <input_port default="1.0" name="select_time"/>
+        </Action>
+        <Decorator ID="RateController">
+            <input_port name="hz">Rate</input_port>
+        </Decorator>
+        <Action ID="RecordCommandControl">
+            <output_port name="goal"/>
+        </Action>
+        <Action ID="RecordPassingTunnelIndex"/>
+        <Action ID="RecordRobotBlood"/>
+        <Action ID="RecordRobotStatus"/>
+        <Control ID="RecoveryNode">
+            <input_port name="number_of_retries">Number of retries</input_port>
+        </Control>
+        <Action ID="RoutinePatrol">
+            <output_port name="routine_goal"/>
+            <input_port name="routine_position_x_1"/>
+            <input_port name="routine_position_x_2"/>
+            <input_port name="routine_position_y_1"/>
+            <input_port name="routine_position_y_2"/>
+            <input_port name="select_time"/>
+        </Action>
+        <Action ID="SelectResurrection">
+            <input_port name="type_of_resurrection"/>
+        </Action>
+        <Action ID="SendDecision"/>
+        <Action ID="SendPatrol"/>
+        <Action ID="SendSentryInfo"/>
+        <Action ID="SendWhitelist"/>
+        <Action ID="SetBlackboarduser">
+            <input_port name="key"/>
+            <input_port name="value"/>
+        </Action>
+        <Action ID="SetGimbalPatrol">
+            <input_port name="patrol"/>
+        </Action>
+        <Action ID="SetPatrol">
+            <input_port name="max_pitch"/>
+            <input_port name="min_pitch"/>
+            <input_port name="mode"/>
+            <input_port name="patrol"/>
+            <input_port name="robot_aim"/>
+            <input_port name="spin"/>
+        </Action>
+        <Action ID="SetSentryInfo">
+            <input_port name="info"/>
+        </Action>
+        <Action ID="SetSpin">
+            <input_port name="spin"/>
+        </Action>
+        <Action ID="SetWhitelist">
+            <input_port name="base"/>
+            <input_port name="engineer"/>
+            <input_port name="hero"/>
+            <input_port name="infantry3"/>
+            <input_port name="infantry4"/>
+            <input_port name="outpost"/>
+            <input_port name="sentry"/>
+        </Action>
+        <Action ID="TruncatePath">
+            <input_port default="{path}" name="input_path"/>
+            <input_port default="{truncated_path}" name="output_path"/>
+        </Action>
+        <Action ID="UpdateGoal">
+            <output_port default="{goal}" name="goal"/>
+            <input_port name="position_x"/>
+            <input_port name="position_y"/>
+        </Action>
+        <Decorator ID="UserForceFailure"/>
+        <Decorator ID="UserForceSuccess"/>
+        <Condition ID="WaitForGameStart"/>
+        <Action ID="WaitForInputPeriod">
+            <input_port name="wait_time"/>
+        </Action>
+    </TreeNodesModel>
+    <!-- ////////// -->
+</root>

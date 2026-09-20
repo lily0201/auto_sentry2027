@@ -1,0 +1,40 @@
+# ROG-Map Simple Node Configuration for auto_sentry2025
+
+/**:
+  ros__parameters:
+    # === 输入话题配置 ===
+    cloud_topic: "/cloud_registered_full"     # Point-LIO输出的点云
+    odom_topic: "/aft_mapped_to_init"         # Point-LIO输出的里程计
+
+    # === 输出话题配置 ===
+    output_grid_topic: "/rog_map/occupancy_grid"  # 发布给Nav2的栅格地图
+
+    # === 地图参数 ===
+    map_resolution: 0.2                       # 地图分辨率 (米) - 降低以节省内存
+    inflation_resolution: 0.4                 # 膨胀层分辨率
+    map_half_size_x: 10.0                     # 地图半宽 (米) - 减小范围
+    map_half_size_y: 10.0                     # 地图半高 (米)
+    map_half_size_z: 1.5                      # 地图半高度 (米)
+
+    # === OccupancyGrid参数 ===
+    grid_width: 200                           # 栅格宽度 (单元格数) - 减小以节省内存
+    grid_height: 200                          # 栅格高度 (单元格数)
+    publish_rate: 10.0                        # 发布频率 (Hz)
+    frame_id: "map"                           # 坐标系
+
+    # === ROG-Map功能开关 ===
+    enable_esdf: true                         # 启用ESDF距离场
+    enable_visualization: false               # 禁用可视化（减少开销）
+
+    # === ROG-Map核心参数 ===
+    prob_hit_log: 0.85                        # 击中概率对数
+    prob_miss_log: 0.4                        # 未击中概率对数
+    clamp_min_log: -2.0                       # 最小对数钳位
+    clamp_max_log: 3.5                        # 最大对数钳位
+    min_ray_length: 0.5                       # 最小射线长度 (米)
+    max_ray_length: 20.0                      # 最大射线长度 (米)
+    odom_timeout: 0.5                         # 里程计超时 (秒)
+
+    # === 性能参数 ===
+    map_sliding_enable: true                  # 启用地图滑动（跟随机器人）
+    ros_callback_enable: true                 # 启用ROS回调

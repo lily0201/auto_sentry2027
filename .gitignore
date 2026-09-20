@@ -1,0 +1,77 @@
+# ROS 2 build artifacts
+build/
+install/
+log/
+.colcon/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+*.egg
+
+# C/C++
+*.o
+*.so
+*.a
+*.out
+*.exe
+*.dll
+*.dylib
+*.cmake
+CMakeCache.txt
+CMakeFiles/
+Makefile
+cmake_install.cmake
+compile_commands.json
+CTestTestfile.cmake
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Bags and logs
+*.bag
+*.db3
+*.mcap
+*.log
+*.csv
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+*.orig
+
+# Configuration backups
+*.yaml.backup
+*.yml.backup
+
+# PCL/Point cloud data
+*.pcd
+*.ply
+
+# Map files
+*.pgm
+*.png
+*.jpg
+*.jpeg
+!**/maps/*.pgm
+!**/maps/*.yaml
+
+# Performance data
+*_perf_*.csv
+/tmp/
+
+# Custom ignore
+*.md.backup
+check_avoidance_system.sh.backup
+compare_avoidance_systems.sh.backup
