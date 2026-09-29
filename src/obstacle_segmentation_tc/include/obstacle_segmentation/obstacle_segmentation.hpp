@@ -50,7 +50,7 @@ private:
     // 创建滤波器对象
     pcl::PassThrough<pcl::PointXYZ> pass_through_filter_x_;
     pcl::PassThrough<pcl::PointXYZ> pass_through_filter_y_;
-    //pcl::PassThrough<pcl::PointXYZ> pass_through_filter_z_;
+    pcl::PassThrough<pcl::PointXYZ> pass_through_filter_z_;
     pcl::VoxelGrid<pcl::PointXYZ> voxfilter;
     std::string input_cloud_topic_;
     std::string output_cloud_topic_;

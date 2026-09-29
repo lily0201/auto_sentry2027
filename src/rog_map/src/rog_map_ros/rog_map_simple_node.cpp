@@ -3,6 +3,9 @@
  * @brief 简化的ROG-Map节点，使用ProbMap核心功能
  */
 
+#define _GNU_SOURCE
+#include <fenv.h>
+
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/point_cloud2.hpp>
 #include <nav_msgs/msg/odometry.hpp>
@@ -101,56 +104,80 @@ private:
         rog_map_ = std::make_shared<SimpleROGMap>();
 
         Config cfg;
+
+        // ===== 第一步：设置 resetMapSize() 需要的基础参数 =====
         cfg.resolution = resolution;
-
-        // inflation_resolution必须 >= resolution
-        cfg.inflation_resolution = resolution + 0.001;  // 稍大于resolution
-        cfg.inflation_step = 1;  // 膨胀步数
-
-        // ESDF分辨率必须 >= inflation_resolution（根据ESDFMap的要求）
-        cfg.esdf_resolution = resolution + 0.002;  // 稍大于inflation_resolution
-        cfg.esdf_en = true;
-
-        // Config需要map_size_d（全尺寸）
+        cfg.inflation_resolution = resolution + 0.001;
+        cfg.esdf_resolution = resolution + 0.002;
         cfg.map_size_d = Vec3f(half_x * 2.0, half_y * 2.0, half_z * 2.0);
 
+        // ===== 第二步：调用 resetMapSize() =====
+        cfg.resetMapSize();
+
+        // ===== 第三步：设置所有其他参数（在 resetMapSize 之后，避免被覆盖）=====
+
+        // 地图滑动
         cfg.map_sliding_en = true;
         cfg.fix_map_origin = Vec3f(0, 0, 0);
 
-        // 设置概率参数
+        // 概率参数
         cfg.p_hit = 0.85;
         cfg.p_miss = 0.4;
         cfg.p_min = 0.12;
         cfg.p_max = 0.97;
-        cfg.p_occ = 0.7;
+        cfg.p_occ = 0.80;
+        cfg.p_free = 0.30;
 
-        cfg.odom_timeout = 0.5;
+        // 手动计算 logit 值（resetMapSize 会重置这些）
+        auto logit = [](double x) { return log(x / (1.0 - x)); };
+        cfg.l_min = logit(cfg.p_min);
+        cfg.l_max = logit(cfg.p_max);
+        cfg.l_occ = logit(cfg.p_occ);
+        cfg.l_free = logit(cfg.p_free);
 
-        // 设置虚拟地面和天花板高度
+        RCLCPP_INFO(this->get_logger(), "[DEBUG] Occupancy thresholds: l_free=%.4f, l_occ=%.4f (p_free=%.4f, p_occ=%.4f)",
+                    cfg.l_free, cfg.l_occ, cfg.p_free, cfg.p_occ);
+
+        // 虚拟地面和天花板（resetMapSize 会重置这些）
         cfg.virtual_ground_height = -0.8;
         cfg.virtual_ceil_height = 1.8;
 
-        // 关闭不需要的功能以减少内存
-        cfg.frontier_extraction_en = false;
-        cfg.unk_inflation_en = false;
-
-        // 设置raycasting参数
+        // Raycasting 参数
+        cfg.raycasting_en = true;
         cfg.raycast_range_min = 0.3;
         cfg.raycast_range_max = 10.0;
         cfg.local_update_box_d = Vec3f(20.0, 20.0, 4.0);
         cfg.esdf_local_update_box = Vec3f(10.0, 10.0, 2.0);
+        cfg.point_filt_num = 1;
+        cfg.batch_update_size = 1;
 
-        // 设置unk_thresh（避免未初始化）
+        // 重新计算平方距离（因为在 resetMapSize 之后修改了 raycast_range）
+        cfg.sqr_raycast_range_min = cfg.raycast_range_min * cfg.raycast_range_min;
+        cfg.sqr_raycast_range_max = cfg.raycast_range_max * cfg.raycast_range_max;
+
+        // 其他参数
+        cfg.esdf_en = true;
+        cfg.inflation_step = 1;
+        cfg.frontier_extraction_en = false;
+        cfg.unk_inflation_en = false;
         cfg.unk_thresh = 0.7;
+        cfg.odom_timeout = 0.5;
 
-        // 调用resetMapSize()来计算half_map_size_i等参数
-        cfg.resetMapSize();
+        // 计算 half_local_update_box_i（需要在设置 local_update_box_d 之后）
+        cfg.half_local_update_box_i.x() = std::ceil(cfg.local_update_box_d.x() / 2.0 / cfg.resolution);
+        cfg.half_local_update_box_i.y() = std::ceil(cfg.local_update_box_d.y() / 2.0 / cfg.resolution);
+        cfg.half_local_update_box_i.z() = std::ceil(cfg.local_update_box_d.z() / 2.0 / cfg.resolution);
 
+        // 打印配置信息
         RCLCPP_INFO(this->get_logger(), "After resetMapSize: resolution=%.3f, inflation_resolution=%.3f, esdf_resolution=%.3f",
                     cfg.resolution, cfg.inflation_resolution, cfg.esdf_resolution);
         RCLCPP_INFO(this->get_logger(), "Config computed: half_map_size_i=[%d,%d,%d], inf_half_map_size_i=[%d,%d,%d]",
                     cfg.half_map_size_i.x(), cfg.half_map_size_i.y(), cfg.half_map_size_i.z(),
                     cfg.inf_half_map_size_i.x(), cfg.inf_half_map_size_i.y(), cfg.inf_half_map_size_i.z());
+        RCLCPP_INFO(this->get_logger(), "Occupancy thresholds: l_occ=%.3f, l_free=%.3f (from p_occ=%.2f, p_free=%.2f)",
+                    cfg.l_occ, cfg.l_free, cfg.p_occ, cfg.p_free);
+        RCLCPP_INFO(this->get_logger(), "Virtual heights: ground=%.2f, ceil=%.2f",
+                    cfg.virtual_ground_height, cfg.virtual_ceil_height);
 
         rog_map_->initialize(cfg);
 
@@ -171,35 +198,77 @@ private:
         }
 
         // 转换点云
-        pcl::PointCloud<pcl::PointXYZI>::Ptr cloud(new pcl::PointCloud<pcl::PointXYZI>);
-        pcl::fromROSMsg(*msg, *cloud);
+        pcl::PointCloud<pcl::PointXYZI>::Ptr cloud_body(new pcl::PointCloud<pcl::PointXYZI>);
+        pcl::fromROSMsg(*msg, *cloud_body);
 
-        if (cloud->empty()) {
+        if (cloud_body->empty()) {
             return;
         }
 
-        // 构造位姿
+        // 构造位姿 - 确保四元数归一化
+        double qw = current_pose_.orientation.w;
+        double qx = current_pose_.orientation.x;
+        double qy = current_pose_.orientation.y;
+        double qz = current_pose_.orientation.z;
+        double norm = std::sqrt(qw*qw + qx*qx + qy*qy + qz*qz);
+
+        if (norm < 1e-6) {
+            RCLCPP_ERROR(this->get_logger(), "Invalid quaternion norm: %f", norm);
+            return;
+        }
+
+        qw /= norm;
+        qx /= norm;
+        qy /= norm;
+        qz /= norm;
+
         Pose pose;
         pose.first = Vec3f(
             current_pose_.position.x,
             current_pose_.position.y,
             current_pose_.position.z
         );
-        pose.second = super_utils::Quatf(
-            current_pose_.orientation.w,
-            current_pose_.orientation.x,
-            current_pose_.orientation.y,
-            current_pose_.orientation.z
-        );
+        pose.second = super_utils::Quatf(qw, qx, qy, qz);
 
-        // 更新地图
-        rog_map_->update(*cloud, pose);
+        // 将点云从 body frame 转换到世界坐标系
+        pcl::PointCloud<pcl::PointXYZI>::Ptr cloud_world(new pcl::PointCloud<pcl::PointXYZI>);
+        cloud_world->reserve(cloud_body->size());
+
+        Eigen::Quaternionf q(qw, qx, qy, qz);
+        Eigen::Vector3f t(current_pose_.position.x, current_pose_.position.y, current_pose_.position.z);
+
+        // 调试：打印前几个点的转换
+        static int debug_frame_count = 0;
+        if (++debug_frame_count % 50 == 0 && !cloud_body->empty()) {
+            const auto& pt0 = cloud_body->points[0];
+            Eigen::Vector3f p_body(pt0.x, pt0.y, pt0.z);
+            Eigen::Vector3f p_world = q * p_body + t;
+            RCLCPP_INFO(this->get_logger(),
+                       "[DEBUG Transform] Body point: [%.2f, %.2f, %.2f] -> World point: [%.2f, %.2f, %.2f], Robot pos: [%.2f, %.2f, %.2f]",
+                       pt0.x, pt0.y, pt0.z, p_world.x(), p_world.y(), p_world.z(),
+                       t.x(), t.y(), t.z());
+        }
+
+        for (const auto& pt_body : *cloud_body) {
+            Eigen::Vector3f p_body(pt_body.x, pt_body.y, pt_body.z);
+            Eigen::Vector3f p_world = q * p_body + t;
+
+            pcl::PointXYZI pt_world;
+            pt_world.x = p_world.x();
+            pt_world.y = p_world.y();
+            pt_world.z = p_world.z();
+            pt_world.intensity = pt_body.intensity;
+            cloud_world->push_back(pt_world);
+        }
+
+        // 更新地图（使用转换后的世界坐标系点云）
+        rog_map_->update(*cloud_world, pose);
 
         cloud_count_++;
         if (cloud_count_ % 10 == 0) {
             RCLCPP_INFO(this->get_logger(),
                        "Updated ROG-Map: cloud#%ld, size=%zu, pos=[%.2f, %.2f, %.2f]",
-                       cloud_count_, cloud->size(),
+                       cloud_count_, cloud_world->size(),
                        pose.first.x(), pose.first.y(), pose.first.z());
         }
     }
@@ -232,12 +301,50 @@ private:
         int free_count = 0;
         int unknown_count = 0;
 
+        static int grid_debug_counter = 0;
+        bool should_debug = (++grid_debug_counter % 10 == 0);
+
         for (int j = 0; j < grid_height_; j++) {
             for (int i = 0; i < grid_width_; i++) {
                 double wx = grid_msg.info.origin.position.x + (i + 0.5) * resolution_;
                 double wy = grid_msg.info.origin.position.y + (j + 0.5) * resolution_;
-                Vec3f pos(wx, wy, 0.0);
+                // 使用机器人当前的 z 坐标，而不是固定的 0.0
+                Vec3f pos(wx, wy, current_pose_.position.z);
                 int idx = i + j * grid_width_;
+
+                // 调试：采样中心点
+                if (should_debug && i == grid_width_/2 && j == grid_height_/2) {
+                    bool is_occ = rog_map_->isOccupied(pos);
+                    bool is_free = rog_map_->isKnownFree(pos);
+                    bool is_unk = rog_map_->isUnknown(pos);
+                    double map_value = rog_map_->getMapValue(pos);
+                    double robot_to_cell_dist = sqrt(pow(pos.x() - current_pose_.position.x, 2) +
+                                                     pow(pos.y() - current_pose_.position.y, 2));
+                    RCLCPP_INFO(this->get_logger(),
+                               "[DEBUG Grid] Center cell: pos=[%.2f, %.2f, %.2f], mapValue=%.4f, isOcc=%d, isFree=%d, isUnk=%d, dist_from_robot=%.2f",
+                               pos.x(), pos.y(), pos.z(), map_value, is_occ, is_free, is_unk, robot_to_cell_dist);
+                }
+
+                // 调试：采样几个其他位置看看是否有任何被标记为占用
+                if (should_debug && i == 0 && j == 0) {
+                    int sample_occupied = 0;
+                    int sample_free = 0;
+                    int sample_unknown = 0;
+                    // 采样 10x10 的子集
+                    for (int sj = 0; sj < grid_height_; sj += 10) {
+                        for (int si = 0; si < grid_width_; si += 10) {
+                            double swx = grid_msg.info.origin.position.x + (si + 0.5) * resolution_;
+                            double swy = grid_msg.info.origin.position.y + (sj + 0.5) * resolution_;
+                            Vec3f spos(swx, swy, current_pose_.position.z);
+                            if (rog_map_->isOccupied(spos)) sample_occupied++;
+                            else if (rog_map_->isKnownFree(spos)) sample_free++;
+                            else sample_unknown++;
+                        }
+                    }
+                    RCLCPP_INFO(this->get_logger(),
+                               "[DEBUG Grid] Sampled 100 cells: occ=%d, free=%d, unk=%d",
+                               sample_occupied, sample_free, sample_unknown);
+                }
 
                 // 查询占据状态
                 if (rog_map_->isOccupied(pos)) {
@@ -250,6 +357,31 @@ private:
                     grid_msg.data[idx] = -1;
                     unknown_count++;
                 }
+            }
+        }
+
+        // 调试：打印前几个非未知格子的实际值
+        static int debug_count = 0;
+        if (debug_count++ < 5 && (occupied_count > 0 || free_count > 0)) {
+            RCLCPP_INFO(this->get_logger(), "[DEBUG] Sample map values around robot:");
+            int sample_count = 0;
+            for (int di = -5; di <= 5 && sample_count < 10; di++) {
+                for (int dj = -5; dj <= 5 && sample_count < 10; dj++) {
+                    Vec3f test_pos(current_pose_.position.x + di * resolution_,
+                                   current_pose_.position.y + dj * resolution_,
+                                   0.0);
+                    double val = rog_map_->getMapValue(test_pos);
+                    // 只打印非零值
+                    if (val != 0.0) {
+                        RCLCPP_INFO(this->get_logger(), "  pos[%.2f,%.2f]: val=%.3f, occ=%d, free=%d",
+                                   test_pos.x(), test_pos.y(), val,
+                                   rog_map_->isOccupied(test_pos), rog_map_->isKnownFree(test_pos));
+                        sample_count++;
+                    }
+                }
+            }
+            if (sample_count == 0) {
+                RCLCPP_WARN(this->get_logger(), "[DEBUG] All sampled values are 0.0!");
             }
         }
 
@@ -288,6 +420,12 @@ private:
 };
 
 int main(int argc, char** argv) {
+    // 禁用浮点异常陷阱 - 防止其他节点启用的FPE陷阱影响ROG-Map
+    #ifdef __linux__
+    fedisableexcept(FE_ALL_EXCEPT);
+    std::cout << "[ROG-Map] Floating point exceptions disabled" << std::endl;
+    #endif
+
     rclcpp::init(argc, argv);
     auto node = std::make_shared<ROGMapSimpleNode>();
     rclcpp::spin(node);

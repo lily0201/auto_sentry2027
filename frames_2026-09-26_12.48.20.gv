@@ -1,0 +1,12 @@
+digraph G {
+"map" -> "lidar_base_link"[label=" Broadcaster: default_authority\nAverage rate: 10.194\nBuffer length: 5.003\nMost recent transform: 1790398100.277373\nOldest transform: 1790398095.274493\n"];
+"origin" -> "map"[label=" Broadcaster: default_authority\nAverage rate: 10000.0\nBuffer length: 0.0\nMost recent transform: 0.0\nOldest transform: 0.0\n"];
+"map" -> "base_link"[label=" Broadcaster: default_authority\nAverage rate: 510000.0\nBuffer length: 0.0\nMost recent transform: 1790398049.399491\nOldest transform: 1790398049.399491\n"];
+"lidar_base_link" -> "odom_yaw"[label=" Broadcaster: default_authority\nAverage rate: 10.198\nBuffer length: 4.903\nMost recent transform: 1790398100.177365\nOldest transform: 1790398095.274493\n"];
+"lidar_base_link" -> "livox_192_168_1_187"[label=" Broadcaster: default_authority\nAverage rate: 10000.0\nBuffer length: 0.0\nMost recent transform: 0.0\nOldest transform: 0.0\n"];
+"lidar_base_link" -> "livox_192_168_1_104"[label=" Broadcaster: default_authority\nAverage rate: 10000.0\nBuffer length: 0.0\nMost recent transform: 0.0\nOldest transform: 0.0\n"];
+edge [style=invis];
+ subgraph cluster_legend { style=bold; color=black; label ="view_frames Result";
+"Recorded at time: 1790398100.3812652"[ shape=plaintext ] ;
+}->"origin";
+}

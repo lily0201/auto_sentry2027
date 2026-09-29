@@ -12,6 +12,9 @@ endif()
 set(CMAKE_BUILD_TYPE "Release")
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
+# Disable floating point exceptions to prevent crashes - MUST be after CMAKE_BUILD_TYPE
+add_compile_options(-fno-trapping-math -fno-signaling-nans)
+
 add_compile_definitions(
         QT_NO_VERSION_TAGGING
         ROOT_DIR="${CMAKE_CURRENT_SOURCE_DIR}/"
@@ -48,6 +51,10 @@ file(GLOB_RECURSE ROG_MAP_SOURCES CONFIGURE_DEPENDS
 add_library(${library_name} STATIC
         ${ROG_MAP_SOURCES}
 )
+
+# Apply floating point exception handling to the library
+target_compile_options(${library_name} PRIVATE -fno-trapping-math -fno-signaling-nans)
+
 
 target_compile_definitions(${library_name}
         PUBLIC
@@ -157,3 +164,7 @@ ament_export_dependencies(
 )
 
 ament_package()
+
+install(DIRECTORY launch/
+        DESTINATION share/${PROJECT_NAME}/launch
+)
