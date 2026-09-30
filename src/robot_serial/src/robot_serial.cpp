@@ -125,7 +125,7 @@ void RobotSerial::map_data_Callback(const rm_interfaces::msg::Map::SharedPtr msg
 
 RobotSerial::RobotSerial() : Node("robot_serial_node")
 {
-    declare_parameter("/serial_name_sentry", "/dev/sentry_serial");
+    declare_parameter("/serial_name_sentry", "/dev/ttyUSB0");
     sentrySerial = std::move(sentry::SentrySerial(get_parameter("/serial_name_sentry").as_string(), 115200));
 
     dog_cnt_ = 0;

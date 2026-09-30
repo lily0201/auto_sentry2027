@@ -314,6 +314,7 @@ merge_pcd_node:
 
 robot_serial_node:
     ros__parameters:
+        serial_name_sentry: "/dev/ttyUSB0"
         dog_threshold: 100
         frequency: 50.0
 

@@ -1,40 +1,26 @@
-# ROG-Map Simple Node Configuration for auto_sentry2025
+# ROG-Map Simple Node Configuration
+# 仅包含节点实际读取的参数（见 rog_map_simple_node.cpp 构造函数）
 
 /**:
   ros__parameters:
-    # === 输入话题配置 ===
-    cloud_topic: "/cloud_registered"     # Point-LIO输出的点云
-    odom_topic: "/Odometry"         # Point-LIO输出的里程计
+    # === 输入/输出话题 ===
+    cloud_topic: "/cloud_registered"              # Point-LIO 世界系点云(frame=map)，节点不再做坐标变换
+    odom_topic: "/Odometry"                       # Point-LIO 里程计
+    output_grid_topic: "/rog_map/occupancy_grid"  # 发布的2D栅格
+    frame_id: "map"
+    publish_rate: 10.0                            # Hz
 
-    # === 输出话题配置 ===
-    output_grid_topic: "/rog_map/occupancy_grid"  # 发布给Nav2的栅格地图
+    # === 3D 地图 ===
+    map_resolution: 0.1                           # m
+    map_half_size_x: 6.0                          # 需 > grid_half_size + map_sliding_threshold
+    map_half_size_y: 6.0
+    map_half_size_z: 1.5
+    virtual_ground_height: -1.2                   # 世界系z；雷达离地约0.5m，需低于地面
+    virtual_ceil_height: 1.5
+    map_sliding_threshold: 0.5                    # 机器人偏离地图中心超过该值才滑动
+    raycast_range_max: 8.0
 
-    # === 地图参数 ===
-    map_resolution: 0.3                       # 地图分辨率 (米) - 降低以节省内存
-    inflation_resolution: 0.6                 # 膨胀层分辨率
-    map_half_size_x: 8.0                     # 地图半宽 (米) - 减小范围
-    map_half_size_y: 8.0                     # 地图半高 (米)
-    map_half_size_z: 1.2                      # 地图半高度 (米)
-
-    # === OccupancyGrid参数 ===
-    grid_width: 100                           # 栅格宽度 (单元格数) - 减小以节省内存
-    grid_height: 100                          # 栅格高度 (单元格数)
-    publish_rate: 5.0                        # 发布频率 (Hz)
-    frame_id: "map"                           # 坐标系
-
-    # === ROG-Map功能开关 ===
-    enable_esdf: false                         # 启用ESDF距离场
-    enable_visualization: false               # 禁用可视化（减少开销）
-
-    # === ROG-Map核心参数 ===
-    prob_hit_log: 0.85                        # 击中概率对数
-    prob_miss_log: 0.4                        # 未击中概率对数
-    clamp_min_log: -2.0                       # 最小对数钳位
-    clamp_max_log: 3.5                        # 最大对数钳位
-    min_ray_length: 1.0                       # 最小射线长度 (米)
-    max_ray_length: 15.0                      # 最大射线长度 (米)
-    odom_timeout: 0.5                         # 里程计超时 (秒)
-
-    # === 性能参数 ===
-    map_sliding_enable: true                  # 启用地图滑动（跟随机器人）
-    ros_callback_enable: true                 # 启用ROS回调
+    # === 2D 栅格投影 ===
+    grid_half_size: 5.0                           # 发布 10m x 10m；超过地图允许范围会被截断
+    proj_z_min: -0.35                             # 相对雷达；地面约在 -0.5，留 0.15 余量避免地面点
+    proj_z_max: 0.02 

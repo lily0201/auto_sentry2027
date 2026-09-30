@@ -3,7 +3,6 @@
  * @brief 简化的ROG-Map节点，使用ProbMap核心功能
  */
 
-#define _GNU_SOURCE
 #include <fenv.h>
 
 #include <rclcpp/rclcpp.hpp>
@@ -43,16 +42,21 @@ public:
     ROGMapSimpleNode() : Node("rog_map_simple"), has_odom_(false) {
         RCLCPP_INFO(this->get_logger(), "=== ROG-Map Simple Node Starting ===");
 
-        // 声明参数 - 使用极小的地图尺寸以避免内存溢出
-        this->declare_parameter("cloud_topic", "/cloud_registered_full");
-        this->declare_parameter("odom_topic", "/aft_mapped_to_init");
+        // 声明参数
+        this->declare_parameter("cloud_topic", "/cloud_registered");
+        this->declare_parameter("odom_topic", "/Odometry");
         this->declare_parameter("output_grid_topic", "/rog_map/occupancy_grid");
-        this->declare_parameter("map_resolution", 0.4);  // 更大的分辨率
-        this->declare_parameter("map_half_size_x", 4.0);  // 更小的范围：8m x 8m
-        this->declare_parameter("map_half_size_y", 4.0);
-        this->declare_parameter("map_half_size_z", 0.8);  // 更低的高度
-        this->declare_parameter("grid_width", 80);  // 更小的栅格：80x80
-        this->declare_parameter("grid_height", 80);
+        this->declare_parameter("map_resolution", 0.1);
+        this->declare_parameter("map_half_size_x", 6.0);   // 3D地图半宽，需大于 grid_half_size + map_sliding_threshold
+        this->declare_parameter("map_half_size_y", 6.0);
+        this->declare_parameter("map_half_size_z", 1.5);
+        this->declare_parameter("virtual_ground_height", -1.2);  // 世界系z，需低于地面(雷达离地约0.5m)
+        this->declare_parameter("virtual_ceil_height", 1.5);
+        this->declare_parameter("map_sliding_threshold", 0.5);
+        this->declare_parameter("raycast_range_max", 8.0);
+        this->declare_parameter("grid_half_size", 5.0);    // 发布的2D栅格半宽(米)
+        this->declare_parameter("proj_z_min", -0.35);      // 投影高度下限，相对雷达(需高于地面噪声)
+        this->declare_parameter("proj_z_max", 0.02);       // 投影高度上限，相对雷达
         this->declare_parameter("publish_rate", 10.0);
         this->declare_parameter("frame_id", "map");
 
@@ -64,19 +68,51 @@ public:
         double half_x = this->get_parameter("map_half_size_x").as_double();
         double half_y = this->get_parameter("map_half_size_y").as_double();
         double half_z = this->get_parameter("map_half_size_z").as_double();
-        grid_width_ = this->get_parameter("grid_width").as_int();
-        grid_height_ = this->get_parameter("grid_height").as_int();
+        double ground_h = this->get_parameter("virtual_ground_height").as_double();
+        double ceil_h = this->get_parameter("virtual_ceil_height").as_double();
+        double slide_thresh = this->get_parameter("map_sliding_threshold").as_double();
+        double ray_max = this->get_parameter("raycast_range_max").as_double();
+        double grid_half = this->get_parameter("grid_half_size").as_double();
+        proj_z_min_ = this->get_parameter("proj_z_min").as_double();
+        proj_z_max_ = this->get_parameter("proj_z_max").as_double();
         double pub_rate = this->get_parameter("publish_rate").as_double();
         frame_id_ = this->get_parameter("frame_id").as_string();
+
+        // 栅格窗口必须完全落在3D地图内：地图中心滑动前最多偏离机器人 slide_thresh
+        const double max_grid_half = std::min(half_x, half_y) - slide_thresh - 2.0 * resolution_;
+        if (grid_half > max_grid_half) {
+            RCLCPP_WARN(this->get_logger(),
+                        "grid_half_size %.2f exceeds map limit %.2f (map_half - sliding_thresh - margin), clamped",
+                        grid_half, max_grid_half);
+            grid_half = max_grid_half;
+        }
+        // 栅格边长取偶数格，使原点可对齐到地图cell边界
+        grid_width_ = 2 * static_cast<int>(std::floor(grid_half / resolution_));
+        grid_height_ = grid_width_;
+        if (grid_width_ <= 0) {
+            throw std::runtime_error("grid size <= 0, check map_half_size / map_sliding_threshold");
+        }
+        if (proj_z_min_ >= proj_z_max_) {
+            throw std::runtime_error("proj_z_min must be smaller than proj_z_max");
+        }
+        // 投影时会按 传感器z + proj_z 查询；若落在 virtual 高度之外，ProbMap 会直接返回 occupied
+        if (proj_z_min_ <= ground_h || proj_z_max_ >= ceil_h) {
+            RCLCPP_WARN(this->get_logger(),
+                        "proj_z [%.2f, %.2f] is not strictly inside virtual range [%.2f, %.2f]; "
+                        "only valid if the sensor stays near z=0",
+                        proj_z_min_, proj_z_max_, ground_h, ceil_h);
+        }
 
         RCLCPP_INFO(this->get_logger(), "Parameters:");
         RCLCPP_INFO(this->get_logger(), "  - cloud_topic: %s", cloud_topic.c_str());
         RCLCPP_INFO(this->get_logger(), "  - odom_topic: %s", odom_topic.c_str());
         RCLCPP_INFO(this->get_logger(), "  - resolution: %.2f m", resolution_);
-        RCLCPP_INFO(this->get_logger(), "  - grid_size: %d x %d", grid_width_, grid_height_);
+        RCLCPP_INFO(this->get_logger(), "  - grid_size: %d x %d cells (%.1f m)", grid_width_, grid_height_,
+                    grid_width_ * resolution_);
+        RCLCPP_INFO(this->get_logger(), "  - proj_z: [%.2f, %.2f] relative to sensor", proj_z_min_, proj_z_max_);
 
         // 初始化ROG-Map
-        initROGMap(resolution_, half_x, half_y, half_z);
+        initROGMap(resolution_, half_x, half_y, half_z, ground_h, ceil_h, slide_thresh, ray_max);
 
         // 订阅
         cloud_sub_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(
@@ -100,87 +136,82 @@ public:
     }
 
 private:
-    void initROGMap(double resolution, double half_x, double half_y, double half_z) {
+    void initROGMap(double resolution, double half_x, double half_y, double half_z,
+                    double ground_h, double ceil_h, double slide_thresh, double ray_max) {
         rog_map_ = std::make_shared<SimpleROGMap>();
 
         Config cfg;
 
-        // ===== 第一步：设置 resetMapSize() 需要的基础参数 =====
+        // resetMapSize() 会根据下列输入推导 half_map_size_i / inf_half_map_size_i /
+        // local_update_box / inf_virtual_*_id_g 以及规整后的 virtual 高度，
+        // 因此所有输入必须在调用它之前设置好，调用之后不要再覆盖这些派生量。
+
+        // 分辨率：膨胀图与主图同分辨率（inflation_ratio = 1）
         cfg.resolution = resolution;
-        cfg.inflation_resolution = resolution + 0.001;
-        cfg.esdf_resolution = resolution + 0.002;
+        cfg.inflation_resolution = resolution;
+        cfg.esdf_resolution = resolution;
+        cfg.inflation_step = 1;
+        cfg.unk_inflation_en = false;
+        cfg.unk_inflation_step = 1;
+        cfg.frontier_extraction_en = false;
+
+        // 地图范围与虚拟地面/天花板
         cfg.map_size_d = Vec3f(half_x * 2.0, half_y * 2.0, half_z * 2.0);
+        cfg.virtual_ground_height = ground_h;
+        cfg.virtual_ceil_height = ceil_h;
+        cfg.local_update_box_d = cfg.map_size_d;
 
-        // ===== 第二步：调用 resetMapSize() =====
         cfg.resetMapSize();
-
-        // ===== 第三步：设置所有其他参数（在 resetMapSize 之后，避免被覆盖）=====
 
         // 地图滑动
         cfg.map_sliding_en = true;
+        cfg.map_sliding_thresh = slide_thresh;
         cfg.fix_map_origin = Vec3f(0, 0, 0);
 
-        // 概率参数
+        // 概率参数（logit 不由 resetMapSize 计算，需手动设置）
         cfg.p_hit = 0.85;
         cfg.p_miss = 0.4;
         cfg.p_min = 0.12;
         cfg.p_max = 0.97;
         cfg.p_occ = 0.80;
         cfg.p_free = 0.30;
-
-        // 手动计算 logit 值（resetMapSize 会重置这些）
         auto logit = [](double x) { return log(x / (1.0 - x)); };
         cfg.l_min = logit(cfg.p_min);
         cfg.l_max = logit(cfg.p_max);
         cfg.l_occ = logit(cfg.p_occ);
         cfg.l_free = logit(cfg.p_free);
-
-        RCLCPP_INFO(this->get_logger(), "[DEBUG] Occupancy thresholds: l_free=%.4f, l_occ=%.4f (p_free=%.4f, p_occ=%.4f)",
-                    cfg.l_free, cfg.l_occ, cfg.p_free, cfg.p_occ);
-
-        // 虚拟地面和天花板（resetMapSize 会重置这些）
-        cfg.virtual_ground_height = -0.8;
-        cfg.virtual_ceil_height = 1.8;
+        cfg.l_hit = logit(cfg.p_hit);
+        cfg.l_miss = logit(cfg.p_miss);
 
         // Raycasting 参数
         cfg.raycasting_en = true;
         cfg.raycast_range_min = 0.3;
-        cfg.raycast_range_max = 10.0;
-        cfg.local_update_box_d = Vec3f(20.0, 20.0, 4.0);
-        cfg.esdf_local_update_box = Vec3f(10.0, 10.0, 2.0);
+        cfg.raycast_range_max = ray_max;
+        cfg.sqr_raycast_range_min = cfg.raycast_range_min * cfg.raycast_range_min;
+        cfg.sqr_raycast_range_max = cfg.raycast_range_max * cfg.raycast_range_max;
         cfg.point_filt_num = 1;
         cfg.batch_update_size = 1;
 
-        // 重新计算平方距离（因为在 resetMapSize 之后修改了 raycast_range）
-        cfg.sqr_raycast_range_min = cfg.raycast_range_min * cfg.raycast_range_min;
-        cfg.sqr_raycast_range_max = cfg.raycast_range_max * cfg.raycast_range_max;
-
-        // 其他参数
-        cfg.esdf_en = true;
-        cfg.inflation_step = 1;
-        cfg.frontier_extraction_en = false;
-        cfg.unk_inflation_en = false;
+        // 其他参数（ESDF 未被使用，关闭以节省内存和计算）
+        cfg.esdf_en = false;
+        cfg.esdf_local_update_box = Vec3f(10.0, 10.0, 2.0);
         cfg.unk_thresh = 0.7;
         cfg.odom_timeout = 0.5;
 
-        // 计算 half_local_update_box_i（需要在设置 local_update_box_d 之后）
-        cfg.half_local_update_box_i.x() = std::ceil(cfg.local_update_box_d.x() / 2.0 / cfg.resolution);
-        cfg.half_local_update_box_i.y() = std::ceil(cfg.local_update_box_d.y() / 2.0 / cfg.resolution);
-        cfg.half_local_update_box_i.z() = std::ceil(cfg.local_update_box_d.z() / 2.0 / cfg.resolution);
-
-        // 打印配置信息
-        RCLCPP_INFO(this->get_logger(), "After resetMapSize: resolution=%.3f, inflation_resolution=%.3f, esdf_resolution=%.3f",
-                    cfg.resolution, cfg.inflation_resolution, cfg.esdf_resolution);
-        RCLCPP_INFO(this->get_logger(), "Config computed: half_map_size_i=[%d,%d,%d], inf_half_map_size_i=[%d,%d,%d]",
+        RCLCPP_INFO(this->get_logger(),
+                    "ROG-Map config: res=%.3f, half_map_size_i=[%d,%d,%d], inf_half_map_size_i=[%d,%d,%d], "
+                    "local_update_box_i=[%d,%d,%d]",
+                    cfg.resolution,
                     cfg.half_map_size_i.x(), cfg.half_map_size_i.y(), cfg.half_map_size_i.z(),
-                    cfg.inf_half_map_size_i.x(), cfg.inf_half_map_size_i.y(), cfg.inf_half_map_size_i.z());
-        RCLCPP_INFO(this->get_logger(), "Occupancy thresholds: l_occ=%.3f, l_free=%.3f (from p_occ=%.2f, p_free=%.2f)",
-                    cfg.l_occ, cfg.l_free, cfg.p_occ, cfg.p_free);
-        RCLCPP_INFO(this->get_logger(), "Virtual heights: ground=%.2f, ceil=%.2f",
-                    cfg.virtual_ground_height, cfg.virtual_ceil_height);
+                    cfg.inf_half_map_size_i.x(), cfg.inf_half_map_size_i.y(), cfg.inf_half_map_size_i.z(),
+                    cfg.local_update_box_i.x(), cfg.local_update_box_i.y(), cfg.local_update_box_i.z());
+        RCLCPP_INFO(this->get_logger(),
+                    "ROG-Map map_size_d=[%.2f,%.2f,%.2f], virtual ground=%.2f, ceil=%.2f, "
+                    "l_free=%.3f, l_occ=%.3f",
+                    cfg.map_size_d.x(), cfg.map_size_d.y(), cfg.map_size_d.z(),
+                    cfg.virtual_ground_height, cfg.virtual_ceil_height, cfg.l_free, cfg.l_occ);
 
         rog_map_->initialize(cfg);
-
         RCLCPP_INFO(this->get_logger(), "ROG-Map initialized successfully!");
     }
 
@@ -197,11 +228,12 @@ private:
             return;
         }
 
-        // 转换点云
-        pcl::PointCloud<pcl::PointXYZI>::Ptr cloud_body(new pcl::PointCloud<pcl::PointXYZI>);
-        pcl::fromROSMsg(*msg, *cloud_body);
+        // Point-LIO 的 /cloud_registered 已经在世界系(map)下，无需再做坐标变换。
+        // 若改订阅 /cloud_registered_body(body系)，则需要 q * p + t 转到世界系。
+        pcl::PointCloud<pcl::PointXYZI>::Ptr cloud_world(new pcl::PointCloud<pcl::PointXYZI>);
+        pcl::fromROSMsg(*msg, *cloud_world);
 
-        if (cloud_body->empty()) {
+        if (cloud_world->empty()) {
             return;
         }
 
@@ -230,38 +262,7 @@ private:
         );
         pose.second = super_utils::Quatf(qw, qx, qy, qz);
 
-        // 将点云从 body frame 转换到世界坐标系
-        pcl::PointCloud<pcl::PointXYZI>::Ptr cloud_world(new pcl::PointCloud<pcl::PointXYZI>);
-        cloud_world->reserve(cloud_body->size());
-
-        Eigen::Quaternionf q(qw, qx, qy, qz);
-        Eigen::Vector3f t(current_pose_.position.x, current_pose_.position.y, current_pose_.position.z);
-
-        // 调试：打印前几个点的转换
-        static int debug_frame_count = 0;
-        if (++debug_frame_count % 50 == 0 && !cloud_body->empty()) {
-            const auto& pt0 = cloud_body->points[0];
-            Eigen::Vector3f p_body(pt0.x, pt0.y, pt0.z);
-            Eigen::Vector3f p_world = q * p_body + t;
-            RCLCPP_INFO(this->get_logger(),
-                       "[DEBUG Transform] Body point: [%.2f, %.2f, %.2f] -> World point: [%.2f, %.2f, %.2f], Robot pos: [%.2f, %.2f, %.2f]",
-                       pt0.x, pt0.y, pt0.z, p_world.x(), p_world.y(), p_world.z(),
-                       t.x(), t.y(), t.z());
-        }
-
-        for (const auto& pt_body : *cloud_body) {
-            Eigen::Vector3f p_body(pt_body.x, pt_body.y, pt_body.z);
-            Eigen::Vector3f p_world = q * p_body + t;
-
-            pcl::PointXYZI pt_world;
-            pt_world.x = p_world.x();
-            pt_world.y = p_world.y();
-            pt_world.z = p_world.z();
-            pt_world.intensity = pt_body.intensity;
-            cloud_world->push_back(pt_world);
-        }
-
-        // 更新地图（使用转换后的世界坐标系点云）
+        // 更新地图（点云与里程计同处世界系）
         rog_map_->update(*cloud_world, pose);
 
         cloud_count_++;
@@ -282,75 +283,49 @@ private:
         grid_msg.header.frame_id = frame_id_;
         grid_msg.header.stamp = this->now();
 
-        // 地图信息
         grid_msg.info.resolution = resolution_;
         grid_msg.info.width = grid_width_;
         grid_msg.info.height = grid_height_;
 
-        // 地图原点：以当前位置为中心
-        double map_size_x = grid_width_ * resolution_;
-        double map_size_y = grid_height_ * resolution_;
-        grid_msg.info.origin.position.x = current_pose_.position.x - map_size_x / 2.0;
-        grid_msg.info.origin.position.y = current_pose_.position.y - map_size_y / 2.0;
+        // 原点对齐到 ROG-Map 的 cell 边界(ORIGIN_AT_CORNER: cell i 覆盖 [i*res, (i+1)*res))，
+        // 使栅格 cell 与地图 cell 一一对应，避免机器人移动时边缘抖动。grid_width_ 为偶数。
+        const int ix0 = static_cast<int>(std::floor(current_pose_.position.x / resolution_)) - grid_width_ / 2;
+        const int iy0 = static_cast<int>(std::floor(current_pose_.position.y / resolution_)) - grid_height_ / 2;
+        grid_msg.info.origin.position.x = ix0 * resolution_;
+        grid_msg.info.origin.position.y = iy0 * resolution_;
         grid_msg.info.origin.position.z = 0.0;
         grid_msg.info.origin.orientation.w = 1.0;
 
-        // 填充栅格数据
-        grid_msg.data.resize(grid_width_ * grid_height_);
+        // 沿 z 在 [sensor_z + proj_z_min, sensor_z + proj_z_max] 内取样，投影为2D
+        const double z_lo = current_pose_.position.z + proj_z_min_;
+        const int nz = std::max(1, static_cast<int>(std::ceil((proj_z_max_ - proj_z_min_) / resolution_)));
+
+        grid_msg.data.resize(static_cast<size_t>(grid_width_) * grid_height_);
         int occupied_count = 0;
         int free_count = 0;
         int unknown_count = 0;
 
-        static int grid_debug_counter = 0;
-        bool should_debug = (++grid_debug_counter % 10 == 0);
-
         for (int j = 0; j < grid_height_; j++) {
             for (int i = 0; i < grid_width_; i++) {
-                double wx = grid_msg.info.origin.position.x + (i + 0.5) * resolution_;
-                double wy = grid_msg.info.origin.position.y + (j + 0.5) * resolution_;
-                // 使用机器人当前的 z 坐标，而不是固定的 0.0
-                Vec3f pos(wx, wy, current_pose_.position.z);
-                int idx = i + j * grid_width_;
+                const double wx = grid_msg.info.origin.position.x + (i + 0.5) * resolution_;
+                const double wy = grid_msg.info.origin.position.y + (j + 0.5) * resolution_;
+                const int idx = i + j * grid_width_;
 
-                // 调试：采样中心点
-                if (should_debug && i == grid_width_/2 && j == grid_height_/2) {
-                    bool is_occ = rog_map_->isOccupied(pos);
-                    bool is_free = rog_map_->isKnownFree(pos);
-                    bool is_unk = rog_map_->isUnknown(pos);
-                    double map_value = rog_map_->getMapValue(pos);
-                    double robot_to_cell_dist = sqrt(pow(pos.x() - current_pose_.position.x, 2) +
-                                                     pow(pos.y() - current_pose_.position.y, 2));
-                    RCLCPP_INFO(this->get_logger(),
-                               "[DEBUG Grid] Center cell: pos=[%.2f, %.2f, %.2f], mapValue=%.4f, isOcc=%d, isFree=%d, isUnk=%d, dist_from_robot=%.2f",
-                               pos.x(), pos.y(), pos.z(), map_value, is_occ, is_free, is_unk, robot_to_cell_dist);
-                }
-
-                // 调试：采样几个其他位置看看是否有任何被标记为占用
-                if (should_debug && i == 0 && j == 0) {
-                    int sample_occupied = 0;
-                    int sample_free = 0;
-                    int sample_unknown = 0;
-                    // 采样 10x10 的子集
-                    for (int sj = 0; sj < grid_height_; sj += 10) {
-                        for (int si = 0; si < grid_width_; si += 10) {
-                            double swx = grid_msg.info.origin.position.x + (si + 0.5) * resolution_;
-                            double swy = grid_msg.info.origin.position.y + (sj + 0.5) * resolution_;
-                            Vec3f spos(swx, swy, current_pose_.position.z);
-                            if (rog_map_->isOccupied(spos)) sample_occupied++;
-                            else if (rog_map_->isKnownFree(spos)) sample_free++;
-                            else sample_unknown++;
-                        }
+                bool occ = false;
+                bool free = false;
+                for (int k = 0; k < nz && !occ; k++) {
+                    const Vec3f pos(wx, wy, z_lo + (k + 0.5) * resolution_);
+                    if (rog_map_->isOccupied(pos)) {
+                        occ = true;
+                    } else if (rog_map_->isKnownFree(pos)) {
+                        free = true;
                     }
-                    RCLCPP_INFO(this->get_logger(),
-                               "[DEBUG Grid] Sampled 100 cells: occ=%d, free=%d, unk=%d",
-                               sample_occupied, sample_free, sample_unknown);
                 }
 
-                // 查询占据状态
-                if (rog_map_->isOccupied(pos)) {
+                if (occ) {
                     grid_msg.data[idx] = 100;
                     occupied_count++;
-                } else if (rog_map_->isKnownFree(pos)) {
+                } else if (free) {
                     grid_msg.data[idx] = 0;
                     free_count++;
                 } else {
@@ -360,34 +335,8 @@ private:
             }
         }
 
-        // 调试：打印前几个非未知格子的实际值
-        static int debug_count = 0;
-        if (debug_count++ < 5 && (occupied_count > 0 || free_count > 0)) {
-            RCLCPP_INFO(this->get_logger(), "[DEBUG] Sample map values around robot:");
-            int sample_count = 0;
-            for (int di = -5; di <= 5 && sample_count < 10; di++) {
-                for (int dj = -5; dj <= 5 && sample_count < 10; dj++) {
-                    Vec3f test_pos(current_pose_.position.x + di * resolution_,
-                                   current_pose_.position.y + dj * resolution_,
-                                   0.0);
-                    double val = rog_map_->getMapValue(test_pos);
-                    // 只打印非零值
-                    if (val != 0.0) {
-                        RCLCPP_INFO(this->get_logger(), "  pos[%.2f,%.2f]: val=%.3f, occ=%d, free=%d",
-                                   test_pos.x(), test_pos.y(), val,
-                                   rog_map_->isOccupied(test_pos), rog_map_->isKnownFree(test_pos));
-                        sample_count++;
-                    }
-                }
-            }
-            if (sample_count == 0) {
-                RCLCPP_WARN(this->get_logger(), "[DEBUG] All sampled values are 0.0!");
-            }
-        }
-
         grid_pub_->publish(grid_msg);
 
-        // 统计信息
         pub_count_++;
         if (pub_count_ % 50 == 0) {
             RCLCPP_INFO(this->get_logger(),
@@ -414,6 +363,8 @@ private:
 
     // 参数
     double resolution_;
+    double proj_z_min_;
+    double proj_z_max_;
     int grid_width_;
     int grid_height_;
     std::string frame_id_;
