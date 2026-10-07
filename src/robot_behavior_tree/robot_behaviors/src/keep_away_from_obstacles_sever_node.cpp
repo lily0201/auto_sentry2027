@@ -32,6 +32,11 @@ private:
         // 转为PCL点云
         pcl::PointCloud<pcl::PointXYZ>::Ptr cloud(new pcl::PointCloud<pcl::PointXYZ>);
         pcl::fromROSMsg(*msg, *cloud);
+        if (cloud->points.empty())
+        {
+            // 无障碍点(rog_map 会发布空点云)，不做处理，避免访问 points[0] 越界
+            return;
+        }
         // 找出距离最近的点
         double min_distance = std::numeric_limits<double>::max();
         size_t min_index = 0;

@@ -23,4 +23,11 @@
     # === 2D 栅格投影 ===
     grid_half_size: 5.0                           # 发布 10m x 10m；超过地图允许范围会被截断
     proj_z_min: -0.35                             # 相对雷达；地面约在 -0.5，留 0.15 余量避免地面点
-    proj_z_max: 0.02 
+    proj_z_max: 0.02                              # 相对雷达
+
+    # === 障碍点云输出（供 Nav2 costmap / KeepAwayFromObstacles）===
+    publish_obstacle_cloud: true
+    obstacle_cloud_topic: "/rog_map/obstacle_cloud"
+    obstacle_cloud_frame: "base_link"             # 必须是底盘系
+    obstacle_cloud_spacing: 0.05                  # 点间距，需等于 costmap 分辨率(0.05)，否则会被 denoise_layer 删掉
+    obstacle_cloud_z: -0.2                        # 相对雷达；须在 costmap 的 [min,max]_obstacle_height(-2.0~0.02) 内

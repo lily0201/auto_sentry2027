@@ -24,6 +24,7 @@ def generate_launch_description():
     nav2_bringup_dir = get_package_share_directory("nav2_bringup") #nav2_bringup功能包
     lidar_merge_path = get_package_share_directory("pointcloud_merge")
     lidar_monitor_path = get_package_share_directory("lidar_monitor")
+    rog_map_path = get_package_share_directory("rog_map")
     livox_driver_path = get_package_share_directory("livox_ros_driver2")
     # lidar_localization_path = get_package_share_directory("point_cloud_registration")
     sentry_strategy_service_path = get_package_share_directory("sentry_strategy_service")
@@ -41,6 +42,12 @@ def generate_launch_description():
         "params_file",
         default_value=param_yaml_path,
         description="Full path to the configuration file to load",
+    )
+    param_use_rog_map = LaunchConfiguration("use_rog_map", default="true")
+    declare_use_rog_map = DeclareLaunchArgument(
+        "use_rog_map",
+        default_value=param_use_rog_map,
+        description="Whether to run ROG-Map (publishes /rog_map/obstacle_cloud used by costmaps)",
     )
     param_launch_rviz = LaunchConfiguration("launch_rviz", default=if_rviz)
     declare_launch_rviz = DeclareLaunchArgument(
@@ -140,6 +147,18 @@ def generate_launch_description():
         name='RMmap_origin2map_broadcaster',
         arguments=['0', '0', '0', '0', '0', '0','1',  'origin', 'map']
     )
+    # ROG-Map：订阅 Point-LIO 的 /cloud_registered 与 /Odometry，发布障碍点云给 costmap
+    rog_map_node = Node(
+        package="rog_map",
+        executable="rog_map_simple_node",
+        name="rog_map_simple",
+        output="screen",
+        parameters=[
+            os.path.join(rog_map_path, "config", "rog_map_simple.yaml"),
+            {"use_sim_time": param_launch_gazebo},
+        ],
+        condition=IfCondition(param_use_rog_map),
+    )
     livox187_to_body = Node(
         package='tf2_ros',
         executable='static_transform_publisher',
@@ -164,6 +183,7 @@ def generate_launch_description():
         declare_yaml_path,
         declare_launch_rviz,
         declare_if_map,
+        declare_use_rog_map,
         declare_rviz_config_dir,
         navigation_launch,
         rviz_node,
@@ -175,7 +195,14 @@ def generate_launch_description():
                 point_lio_launch
             ],
         ),
-        obstacle_segmentation_launch,
+        #obstacle_segmentation_launch,
+        # 等 Point-LIO 起来后再启动 ROG-Map，避免启动时负载过高
+        TimerAction(
+            period=8.0,
+            actions=[
+                rog_map_node
+            ],
+        ),
         # sentry_strategy_service_launch
     ]
 

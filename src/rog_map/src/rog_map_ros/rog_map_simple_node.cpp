@@ -14,6 +14,9 @@
 #include <pcl/point_types.h>
 #include <pcl_conversions/pcl_conversions.h>
 
+#include <tf2_ros/buffer.h>
+#include <tf2_ros/transform_listener.h>
+
 #include "rog_map/prob_map.h"
 
 using namespace rog_map;
@@ -60,6 +63,14 @@ public:
         this->declare_parameter("publish_rate", 10.0);
         this->declare_parameter("frame_id", "map");
 
+        // 障碍点云输出(供 Nav2 ObstacleLayer / KeepAwayFromObstacles 使用)
+        // 必须是机器人底盘系：ObstacleLayer 以点云 frame 原点作为 raytrace 起点，行为节点也把 x,y 当作相对机器人的偏移
+        this->declare_parameter("publish_obstacle_cloud", true);
+        this->declare_parameter("obstacle_cloud_topic", "/rog_map/obstacle_cloud");
+        this->declare_parameter("obstacle_cloud_frame", "base_link");
+        this->declare_parameter("obstacle_cloud_spacing", 0.05);  // 点间距，应等于 costmap 分辨率
+        this->declare_parameter("obstacle_cloud_z", -0.2);  // 点的高度，相对雷达；须落在 costmap 的 [min,max]_obstacle_height 内
+
         // 获取参数
         std::string cloud_topic = this->get_parameter("cloud_topic").as_string();
         std::string odom_topic = this->get_parameter("odom_topic").as_string();
@@ -77,6 +88,14 @@ public:
         proj_z_max_ = this->get_parameter("proj_z_max").as_double();
         double pub_rate = this->get_parameter("publish_rate").as_double();
         frame_id_ = this->get_parameter("frame_id").as_string();
+        publish_obstacle_cloud_ = this->get_parameter("publish_obstacle_cloud").as_bool();
+        std::string obstacle_topic = this->get_parameter("obstacle_cloud_topic").as_string();
+        obstacle_cloud_frame_ = this->get_parameter("obstacle_cloud_frame").as_string();
+        obstacle_cloud_z_ = this->get_parameter("obstacle_cloud_z").as_double();
+        // 每个占据格按 costmap 分辨率展开成 n x n 个点，使其落到 costmap 上是连续的一片。
+        // 若每格只发一个点，0.1m 间距对 0.05m 的 costmap 是互不相邻的孤立单元，会被 DenoiseLayer 当作噪声删掉。
+        obstacle_sub_n_ = std::max(1, static_cast<int>(std::lround(
+            resolution_ / this->get_parameter("obstacle_cloud_spacing").as_double())));
 
         // 栅格窗口必须完全落在3D地图内：地图中心滑动前最多偏离机器人 slide_thresh
         const double max_grid_half = std::min(half_x, half_y) - slide_thresh - 2.0 * resolution_;
@@ -125,6 +144,13 @@ public:
 
         // 发布
         grid_pub_ = this->create_publisher<nav_msgs::msg::OccupancyGrid>(output_topic, 10);
+        if (publish_obstacle_cloud_) {
+            obstacle_pub_ = this->create_publisher<sensor_msgs::msg::PointCloud2>(obstacle_topic, 10);
+            tf_buffer_ = std::make_unique<tf2_ros::Buffer>(this->get_clock());
+            tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
+            RCLCPP_INFO(this->get_logger(), "  - obstacle cloud: %s (frame %s, z=%.2f rel. sensor)",
+                        obstacle_topic.c_str(), obstacle_cloud_frame_.c_str(), obstacle_cloud_z_);
+        }
 
         // 定时器
         auto period_ms = static_cast<int>(1000.0 / pub_rate);
@@ -305,6 +331,9 @@ private:
         int free_count = 0;
         int unknown_count = 0;
 
+        pcl::PointCloud<pcl::PointXYZ> obstacle_map;  // 占据格展开后的点，map系
+        const float obstacle_z = static_cast<float>(current_pose_.position.z + obstacle_cloud_z_);
+
         for (int j = 0; j < grid_height_; j++) {
             for (int i = 0; i < grid_width_; i++) {
                 const double wx = grid_msg.info.origin.position.x + (i + 0.5) * resolution_;
@@ -325,6 +354,15 @@ private:
                 if (occ) {
                     grid_msg.data[idx] = 100;
                     occupied_count++;
+                    for (int sy = 0; sy < obstacle_sub_n_; sy++) {
+                        for (int sx = 0; sx < obstacle_sub_n_; sx++) {
+                            const double ox = (sx + 0.5) / obstacle_sub_n_ - 0.5;
+                            const double oy = (sy + 0.5) / obstacle_sub_n_ - 0.5;
+                            obstacle_map.push_back(pcl::PointXYZ(static_cast<float>(wx + ox * resolution_),
+                                                                 static_cast<float>(wy + oy * resolution_),
+                                                                 obstacle_z));
+                        }
+                    }
                 } else if (free) {
                     grid_msg.data[idx] = 0;
                     free_count++;
@@ -336,6 +374,9 @@ private:
         }
 
         grid_pub_->publish(grid_msg);
+        if (publish_obstacle_cloud_) {
+            publishObstacleCloud(obstacle_map);
+        }
 
         pub_count_++;
         if (pub_count_ % 50 == 0) {
@@ -346,11 +387,47 @@ private:
         }
     }
 
+    // 把 map 系的障碍点转到底盘系并发布。
+    void publishObstacleCloud(const pcl::PointCloud<pcl::PointXYZ>& cloud_map) {
+        geometry_msgs::msg::TransformStamped tf;
+        try {
+            // p_base = T * p_map；取最新的 TF，并用它的时间戳，保证下游按同一时刻查 TF 能查到
+            tf = tf_buffer_->lookupTransform(obstacle_cloud_frame_, frame_id_, tf2::TimePointZero);
+        } catch (const tf2::TransformException& ex) {
+            RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 2000,
+                                 "Skip obstacle cloud, TF %s <- %s unavailable: %s",
+                                 obstacle_cloud_frame_.c_str(), frame_id_.c_str(), ex.what());
+            return;
+        }
+
+        const auto& r = tf.transform.rotation;
+        const auto& tr = tf.transform.translation;
+        const Eigen::Quaternionf q(static_cast<float>(r.w), static_cast<float>(r.x),
+                                   static_cast<float>(r.y), static_cast<float>(r.z));
+        const Eigen::Vector3f t(static_cast<float>(tr.x), static_cast<float>(tr.y), static_cast<float>(tr.z));
+
+        pcl::PointCloud<pcl::PointXYZ> cloud_base;
+        cloud_base.reserve(cloud_map.size());
+        for (const auto& p : cloud_map) {
+            const Eigen::Vector3f pb = q.normalized() * Eigen::Vector3f(p.x, p.y, p.z) + t;
+            cloud_base.push_back(pcl::PointXYZ(pb.x(), pb.y(), pb.z()));
+        }
+
+        sensor_msgs::msg::PointCloud2 msg;
+        pcl::toROSMsg(cloud_base, msg);
+        msg.header.frame_id = obstacle_cloud_frame_;
+        msg.header.stamp = tf.header.stamp;
+        obstacle_pub_->publish(msg);  // 空点云也发布，表示当前无障碍
+    }
+
     // ROS接口
     rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr cloud_sub_;
     rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;
     rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr grid_pub_;
+    rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr obstacle_pub_;
     rclcpp::TimerBase::SharedPtr timer_;
+    std::unique_ptr<tf2_ros::Buffer> tf_buffer_;
+    std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
 
     // ROG-Map实例
     std::shared_ptr<SimpleROGMap> rog_map_;
@@ -368,6 +445,10 @@ private:
     int grid_width_;
     int grid_height_;
     std::string frame_id_;
+    bool publish_obstacle_cloud_{true};
+    std::string obstacle_cloud_frame_;
+    double obstacle_cloud_z_{-0.2};
+    int obstacle_sub_n_{1};
 };
 
 int main(int argc, char** argv) {
