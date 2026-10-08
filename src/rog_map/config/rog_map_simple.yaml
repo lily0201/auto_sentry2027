@@ -22,7 +22,7 @@
 
     # === 2D 栅格投影 ===
     grid_half_size: 5.0                           # 发布 10m x 10m；超过地图允许范围会被截断
-    proj_z_min: -0.35                             # 相对雷达；地面约在 -0.5，留 0.15 余量避免地面点
+    proj_z_min: -0.23                             # 相对雷达；地面约在 -0.5，留 0.15 余量避免地面点
     proj_z_max: 0.02                              # 相对雷达
 
     # === 障碍点云输出（供 Nav2 costmap / KeepAwayFromObstacles）===

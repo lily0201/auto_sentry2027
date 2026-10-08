@@ -927,7 +927,6 @@ void ProbMap::raycastProcess(const PointCloud & input_cloud, const Vec3f & cur_o
 #ifdef _OPENMP
   if (cfg_.parallel_raycast_en && cfg_.raycasting_en && cfg_.raycast_num_threads > 1 &&
       input_cloud.size() > static_cast<size_t>(cfg_.raycast_num_threads * 16)) {
-    std::cout << "[DEBUG] Using parallel raycast" << std::endl;
     raycastProcessParallel(input_cloud, cur_odom);
     return;
   }
