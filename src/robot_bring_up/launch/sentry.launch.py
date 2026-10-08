@@ -188,7 +188,7 @@ def generate_launch_description():
         navigation_launch,
         rviz_node,
         # lidar_merge_launch,
-        #lidar_monitor_launch,
+        lidar_monitor_launch,
         TimerAction(
             period=5.0,
             actions=[
