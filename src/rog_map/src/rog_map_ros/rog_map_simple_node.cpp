@@ -69,7 +69,13 @@ public:
         this->declare_parameter("obstacle_cloud_topic", "/rog_map/obstacle_cloud");
         this->declare_parameter("obstacle_cloud_frame", "base_link");
         this->declare_parameter("obstacle_cloud_spacing", 0.05);  // 点间距，应等于 costmap 分辨率
-        this->declare_parameter("obstacle_cloud_z", -0.2);  // 点的高度，相对雷达；须落在 costmap 的 [min,max]_obstacle_height 内
+        this->declare_parameter("obstacle_cloud_z", -0.2);
+
+        // 带真实高度的3D占据点云(仅用于可视化/调试，不接入costmap；无订阅者时不计算)
+        this->declare_parameter("publish_cloud_3d", true);
+        this->declare_parameter("cloud_3d_topic", "/rog_map/obstacle_cloud_3d");
+        this->declare_parameter("cloud_3d_z_min", -0.9);  // 相对雷达，须在virtual_ground/ceil之内，否则查询恒为占据
+        this->declare_parameter("cloud_3d_z_max", 1.2);  // 点的高度，相对雷达；须落在 costmap 的 [min,max]_obstacle_height 内
 
         // 获取参数
         std::string cloud_topic = this->get_parameter("cloud_topic").as_string();
@@ -92,6 +98,10 @@ public:
         std::string obstacle_topic = this->get_parameter("obstacle_cloud_topic").as_string();
         obstacle_cloud_frame_ = this->get_parameter("obstacle_cloud_frame").as_string();
         obstacle_cloud_z_ = this->get_parameter("obstacle_cloud_z").as_double();
+        publish_cloud_3d_ = this->get_parameter("publish_cloud_3d").as_bool();
+        std::string cloud_3d_topic = this->get_parameter("cloud_3d_topic").as_string();
+        cloud_3d_z_min_ = std::max(this->get_parameter("cloud_3d_z_min").as_double(), ground_h + resolution_);
+        cloud_3d_z_max_ = std::min(this->get_parameter("cloud_3d_z_max").as_double(), ceil_h - resolution_);
         // 每个占据格按 costmap 分辨率展开成 n x n 个点，使其落到 costmap 上是连续的一片。
         // 若每格只发一个点，0.1m 间距对 0.05m 的 costmap 是互不相邻的孤立单元，会被 DenoiseLayer 当作噪声删掉。
         obstacle_sub_n_ = std::max(1, static_cast<int>(std::lround(
@@ -144,6 +154,9 @@ public:
 
         // 发布
         grid_pub_ = this->create_publisher<nav_msgs::msg::OccupancyGrid>(output_topic, 10);
+        if (publish_cloud_3d_) {
+            cloud_3d_pub_ = this->create_publisher<sensor_msgs::msg::PointCloud2>(cloud_3d_topic, 1);
+        }
         if (publish_obstacle_cloud_) {
             obstacle_pub_ = this->create_publisher<sensor_msgs::msg::PointCloud2>(obstacle_topic, 10);
             tf_buffer_ = std::make_unique<tf2_ros::Buffer>(this->get_clock());
@@ -377,6 +390,9 @@ private:
         if (publish_obstacle_cloud_) {
             publishObstacleCloud(obstacle_map);
         }
+        if (publish_cloud_3d_ && cloud_3d_pub_->get_subscription_count() > 0) {
+            publishCloud3D(grid_msg.info.origin.position.x, grid_msg.info.origin.position.y);
+        }
 
         pub_count_++;
         if (pub_count_ % 50 == 0) {
@@ -385,6 +401,31 @@ private:
                        occupied_count, free_count, unknown_count,
                        current_pose_.position.x, current_pose_.position.y);
         }
+    }
+
+    // 发布带真实高度的占据体素中心(map系)，范围与2D栅格窗口一致，高度为 [z_min, z_max] 相对雷达。
+    void publishCloud3D(double origin_x, double origin_y) {
+        pcl::PointCloud<pcl::PointXYZ> cloud;
+        const double z_lo = current_pose_.position.z + cloud_3d_z_min_;
+        const int nz = std::max(1, static_cast<int>(std::ceil((cloud_3d_z_max_ - cloud_3d_z_min_) / resolution_)));
+        for (int j = 0; j < grid_height_; j++) {
+            for (int i = 0; i < grid_width_; i++) {
+                const double wx = origin_x + (i + 0.5) * resolution_;
+                const double wy = origin_y + (j + 0.5) * resolution_;
+                for (int k = 0; k < nz; k++) {
+                    const double wz = z_lo + (k + 0.5) * resolution_;
+                    if (rog_map_->isOccupied(Vec3f(wx, wy, wz))) {
+                        cloud.push_back(pcl::PointXYZ(static_cast<float>(wx), static_cast<float>(wy),
+                                                      static_cast<float>(wz)));
+                    }
+                }
+            }
+        }
+        sensor_msgs::msg::PointCloud2 msg;
+        pcl::toROSMsg(cloud, msg);
+        msg.header.frame_id = frame_id_;
+        msg.header.stamp = this->now();
+        cloud_3d_pub_->publish(msg);
     }
 
     // 把 map 系的障碍点转到底盘系并发布。
@@ -425,6 +466,7 @@ private:
     rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;
     rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr grid_pub_;
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr obstacle_pub_;
+    rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr cloud_3d_pub_;
     rclcpp::TimerBase::SharedPtr timer_;
     std::unique_ptr<tf2_ros::Buffer> tf_buffer_;
     std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
@@ -449,6 +491,9 @@ private:
     std::string obstacle_cloud_frame_;
     double obstacle_cloud_z_{-0.2};
     int obstacle_sub_n_{1};
+    bool publish_cloud_3d_{true};
+    double cloud_3d_z_min_{-0.9};
+    double cloud_3d_z_max_{1.2};
 };
 
 int main(int argc, char** argv) {
