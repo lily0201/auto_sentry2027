@@ -18,6 +18,7 @@
 #include <tf2_ros/transform_listener.h>
 
 #include "rog_map/prob_map.h"
+#include "rog_map/projection_layer.hpp"
 
 using namespace rog_map;
 
@@ -36,7 +37,54 @@ public:
     }
 
     void update(const PointCloud& cloud, const Pose& pose) {
+        setUpdateTime(getSystemWalltimeNow());  // 给体素打命中时间戳(ProjectionLayer 的 obstacle_hold_time 用)
         updateProbMap(cloud, pose, pose.first);
+    }
+
+    // 绝对 z 范围 -> 3D 地图的全局 z 索引范围(裁剪到当前局部地图内)
+    void scanZRange(double z_lo, double z_hi, int& z_min_id, int& z_max_id) const {
+        posToGlobalIndex(z_lo, z_min_id);
+        posToGlobalIndex(z_hi, z_max_id);
+        if (z_min_id > z_max_id) {
+            std::swap(z_min_id, z_max_id);
+        }
+        z_min_id = std::max(z_min_id, localMapMinIndex().z());
+        z_max_id = std::min(z_max_id, localMapMaxIndex().z());
+    }
+
+    // ProjectionLayer 的按列扫描回调：统计 (gx,gy) 这一列在 [z_min_id, z_max_id] 内的占据分布。
+    // 直接读原始概率，不套用 virtual ground/ceil 规则(与 ROGMap::refreshLayers 的做法一致)。
+    ColumnStats scanColumn(int gx, int gy, int z_min_id, int z_max_id) const {
+        ColumnStats stats;
+        for (int gz = z_min_id; gz <= z_max_id; ++gz) {
+            const Vec3i id_g(gx, gy, gz);
+            if (!insideLocalMap(id_g)) {
+                continue;
+            }
+            const int hash_id = getHashIndexFromGlobalIndex(id_g);
+            if (hash_id < 0 || hash_id >= static_cast<int>(occupancy_buffer_.size())) {
+                continue;
+            }
+            const double prob = occupancy_buffer_[hash_id];
+            const bool occupied = ProbMap::isOccupied(prob);
+            const bool known_free = ProbMap::isKnownFree(prob);
+            if (!occupied && !known_free) {
+                continue;  // 未知体素不计入观测
+            }
+            ++stats.observed_count;
+            stats.last_update_time = std::max(stats.last_update_time, cellLastUpdateTime(id_g));
+            if (occupied) {
+                ++stats.occupied_count;
+                stats.occupied_z_index_min = std::min(stats.occupied_z_index_min, gz);
+                stats.occupied_z_index_max = std::max(stats.occupied_z_index_max, gz);
+                Vec3f pos;
+                globalIndexToPos(id_g, pos);
+                stats.occupied_z_min_abs = std::min(stats.occupied_z_min_abs, static_cast<double>(pos.z()));
+                stats.occupied_z_max_abs = std::max(stats.occupied_z_max_abs, static_cast<double>(pos.z()));
+                stats.last_hit_time = std::max(stats.last_hit_time, cellLastHitTime(id_g));
+            }
+        }
+        return stats;
     }
 };
 
@@ -75,7 +123,32 @@ public:
         this->declare_parameter("publish_cloud_3d", true);
         this->declare_parameter("cloud_3d_topic", "/rog_map/obstacle_cloud_3d");
         this->declare_parameter("cloud_3d_z_min", -0.9);  // 相对雷达，须在virtual_ground/ceil之内，否则查询恒为占据
-        this->declare_parameter("cloud_3d_z_max", 1.2);  // 点的高度，相对雷达；须落在 costmap 的 [min,max]_obstacle_height 内
+        this->declare_parameter("cloud_3d_z_max", 1.2);
+
+        // ProjectionLayer: 按 xy 列分析 3D 占据的垂直分布，区分 地面/墙/隧道(门洞)。
+        // projection_layer_en: 运行该层并发布调试栅格(不改变 costmap 输出)
+        // projection_use_for_output: 用该层结果替换 "固定高度带" 逻辑，生成 occupancy_grid 和障碍点云
+        this->declare_parameter("projection_layer_en", false);
+        this->declare_parameter("projection_use_for_output", false);
+        this->declare_parameter("projection_debug_topic", "/rog_map/projection_grid");
+        this->declare_parameter("layer_scan_z_min", -0.25);  // 扫描高度范围，相对雷达
+        this->declare_parameter("layer_scan_z_max", 1.2);
+        this->declare_parameter("layer_unknown_as_occupied", false);
+        this->declare_parameter("layer_min_observed_voxels", 2);
+        this->declare_parameter("layer_surface_height_delta_max", 0.10);
+        this->declare_parameter("layer_wall_height_delta_min", 0.20);
+        this->declare_parameter("layer_wall_occupancy_ratio_min", 0.80);
+        this->declare_parameter("layer_tunnel_height_delta_min", 0.24);
+        this->declare_parameter("layer_tunnel_height_delta_max", 0.40);
+        this->declare_parameter("layer_tunnel_occupancy_ratio_max", 0.55);
+        this->declare_parameter("layer_passable_as_free", true);
+        this->declare_parameter("layer_passable_cost", 50);
+        this->declare_parameter("layer_hysteresis_en", true);
+        this->declare_parameter("layer_hysteresis_count", 2);
+        this->declare_parameter("layer_obstacle_hold_time", 0.0);
+        this->declare_parameter("layer_mask_filter_en", true);
+        this->declare_parameter("layer_fill_occ_min", 5);
+        this->declare_parameter("layer_denoise_occ_max", 0);
 
         // 获取参数
         std::string cloud_topic = this->get_parameter("cloud_topic").as_string();
@@ -102,6 +175,32 @@ public:
         std::string cloud_3d_topic = this->get_parameter("cloud_3d_topic").as_string();
         cloud_3d_z_min_ = std::max(this->get_parameter("cloud_3d_z_min").as_double(), ground_h + resolution_);
         cloud_3d_z_max_ = std::min(this->get_parameter("cloud_3d_z_max").as_double(), ceil_h - resolution_);
+
+        projection_layer_en_ = this->get_parameter("projection_layer_en").as_bool();
+        projection_use_for_output_ = projection_layer_en_ && this->get_parameter("projection_use_for_output").as_bool();
+        std::string projection_debug_topic = this->get_parameter("projection_debug_topic").as_string();
+        layer_scan_z_min_ = this->get_parameter("layer_scan_z_min").as_double();
+        layer_scan_z_max_ = this->get_parameter("layer_scan_z_max").as_double();
+        if (layer_scan_z_min_ >= layer_scan_z_max_) {
+            throw std::runtime_error("layer_scan_z_min must be smaller than layer_scan_z_max");
+        }
+        layer_cfg_.unknown_as_occupied = this->get_parameter("layer_unknown_as_occupied").as_bool();
+        layer_cfg_.min_observed_voxels = this->get_parameter("layer_min_observed_voxels").as_int();
+        layer_cfg_.surface_height_delta_max = this->get_parameter("layer_surface_height_delta_max").as_double();
+        layer_cfg_.wall_height_delta_min = this->get_parameter("layer_wall_height_delta_min").as_double();
+        layer_cfg_.wall_occupancy_ratio_min = this->get_parameter("layer_wall_occupancy_ratio_min").as_double();
+        layer_cfg_.tunnel_height_delta_min = this->get_parameter("layer_tunnel_height_delta_min").as_double();
+        layer_cfg_.tunnel_height_delta_max = this->get_parameter("layer_tunnel_height_delta_max").as_double();
+        layer_cfg_.tunnel_occupancy_ratio_max = this->get_parameter("layer_tunnel_occupancy_ratio_max").as_double();
+        layer_cfg_.passable_as_free = this->get_parameter("layer_passable_as_free").as_bool();
+        layer_cfg_.passable_cost = static_cast<uint8_t>(
+            std::clamp<int64_t>(this->get_parameter("layer_passable_cost").as_int(), 0, 252));
+        layer_cfg_.hysteresis_en = this->get_parameter("layer_hysteresis_en").as_bool();
+        layer_cfg_.hysteresis_count = this->get_parameter("layer_hysteresis_count").as_int();
+        layer_cfg_.obstacle_hold_time = this->get_parameter("layer_obstacle_hold_time").as_double();
+        layer_cfg_.mask_filter_en = this->get_parameter("layer_mask_filter_en").as_bool();
+        layer_cfg_.fill_occ_min = this->get_parameter("layer_fill_occ_min").as_int();
+        layer_cfg_.denoise_occ_max = this->get_parameter("layer_denoise_occ_max").as_int();
         // 每个占据格按 costmap 分辨率展开成 n x n 个点，使其落到 costmap 上是连续的一片。
         // 若每格只发一个点，0.1m 间距对 0.05m 的 costmap 是互不相邻的孤立单元，会被 DenoiseLayer 当作噪声删掉。
         obstacle_sub_n_ = std::max(1, static_cast<int>(std::lround(
@@ -154,6 +253,12 @@ public:
 
         // 发布
         grid_pub_ = this->create_publisher<nav_msgs::msg::OccupancyGrid>(output_topic, 10);
+        if (projection_layer_en_) {
+            projection_layer_ = std::make_unique<ProjectionLayer>();
+            projection_pub_ = this->create_publisher<nav_msgs::msg::OccupancyGrid>(projection_debug_topic, 1);
+            RCLCPP_INFO(this->get_logger(), "  - ProjectionLayer enabled (use_for_output=%d), debug grid: %s",
+                        projection_use_for_output_, projection_debug_topic.c_str());
+        }
         if (publish_cloud_3d_) {
             cloud_3d_pub_ = this->create_publisher<sensor_msgs::msg::PointCloud2>(cloud_3d_topic, 1);
         }
@@ -335,6 +440,12 @@ private:
         grid_msg.info.origin.position.z = 0.0;
         grid_msg.info.origin.orientation.w = 1.0;
 
+        // ProjectionLayer: 窗口 = 输出栅格各边多 1 格(奇数)，起点与输出栅格重合，
+        // 因此输出栅格 (i,j) 对应 layer 视图 (i,j)，索引 j*layer_w + i。
+        const bool layer_ready = projection_layer_en_ && updateProjectionLayer(ix0, iy0);
+        const bool use_layer = layer_ready && projection_use_for_output_;
+        const int layer_w = grid_width_ + 1;
+
         // 沿 z 在 [sensor_z + proj_z_min, sensor_z + proj_z_max] 内取样，投影为2D
         const double z_lo = current_pose_.position.z + proj_z_min_;
         const int nz = std::max(1, static_cast<int>(std::ceil((proj_z_max_ - proj_z_min_) / resolution_)));
@@ -355,12 +466,18 @@ private:
 
                 bool occ = false;
                 bool free = false;
-                for (int k = 0; k < nz && !occ; k++) {
-                    const Vec3f pos(wx, wy, z_lo + (k + 0.5) * resolution_);
-                    if (rog_map_->isOccupied(pos)) {
-                        occ = true;
-                    } else if (rog_map_->isKnownFree(pos)) {
-                        free = true;
+                if (use_layer) {
+                    const CellType type = projection_layer_->cells()[static_cast<size_t>(j) * layer_w + i].type;
+                    occ = (type == CellType::OCCUPIED);
+                    free = (type == CellType::FREE || type == CellType::PASSABLE);
+                } else {
+                    for (int k = 0; k < nz && !occ; k++) {
+                        const Vec3f pos(wx, wy, z_lo + (k + 0.5) * resolution_);
+                        if (rog_map_->isOccupied(pos)) {
+                            occ = true;
+                        } else if (rog_map_->isKnownFree(pos)) {
+                            free = true;
+                        }
                     }
                 }
 
@@ -393,6 +510,9 @@ private:
         if (publish_cloud_3d_ && cloud_3d_pub_->get_subscription_count() > 0) {
             publishCloud3D(grid_msg.info.origin.position.x, grid_msg.info.origin.position.y);
         }
+        if (layer_ready && projection_pub_->get_subscription_count() > 0) {
+            publishProjectionDebug(grid_msg.info.origin.position.x, grid_msg.info.origin.position.y);
+        }
 
         pub_count_++;
         if (pub_count_ % 50 == 0) {
@@ -401,6 +521,86 @@ private:
                        occupied_count, free_count, unknown_count,
                        current_pose_.position.x, current_pose_.position.y);
         }
+    }
+
+    // 用当前 3D 占据地图更新 ProjectionLayer。成功返回 true；出错时关闭该层并报错，不影响原有输出。
+    bool updateProjectionLayer(int ix0, int iy0) {
+        const int w = grid_width_ + 1;   // 必须为奇数(ProjectionLayer 的要求)，grid_width_ 是偶数
+        const int h = grid_height_ + 1;
+        const Eigen::Vector2i min_id(ix0, iy0);
+        const Eigen::Vector2d origin(ix0 * resolution_, iy0 * resolution_);  // 窗口左下角(ORIGIN_AT_CORNER)
+
+        int z_min_id = 0;
+        int z_max_id = 0;
+        rog_map_->scanZRange(current_pose_.position.z + layer_scan_z_min_,
+                             current_pose_.position.z + layer_scan_z_max_, z_min_id, z_max_id);
+        auto scanner = [this, min_id, z_min_id, z_max_id](int mx, int my) {
+            return rog_map_->scanColumn(min_id.x() + mx, min_id.y() + my, z_min_id, z_max_id);
+        };
+
+        try {
+            const double now = rog_map_->getSystemWalltimeNow();
+            ProjectionUpdateStats stats;
+            projection_layer_->syncSlidingWindow(w, h, resolution_, min_id, origin, layer_cfg_);
+            projection_layer_->updateFull(w, h, resolution_, origin, now, layer_cfg_, scanner, &stats);
+            if (layer_cfg_.obstacle_hold_time > 0.0) {
+                projection_layer_->advanceObstacleClearance(now, layer_cfg_);
+            }
+            if (++layer_log_counter_ % 50 == 0) {
+                RCLCPP_INFO(this->get_logger(),
+                            "ProjectionLayer: %.1f ms | thin_surface=%.0f wall=%.0f tunnel=%.0f ambiguous=%.0f "
+                            "empty=%.0f insufficient=%.0f",
+                            stats.update_full_time_ms, stats.thin_surface_count, stats.vertical_wall_count,
+                            stats.hollow_tunnel_count, stats.ambiguous_occupied_count, stats.empty_column_count,
+                            stats.insufficient_observation_count);
+            }
+        } catch (const std::exception& e) {
+            RCLCPP_ERROR(this->get_logger(), "ProjectionLayer update failed, disabling it: %s", e.what());
+            projection_layer_en_ = false;
+            projection_use_for_output_ = false;
+            return false;
+        }
+        return projection_layer_->cells().size() == static_cast<size_t>(w) * h;
+    }
+
+    // 发布 ProjectionLayer 的分类结果(调试用，frame=map)。数值含义：
+    //  -1 未知 | 0 空闲 | 20 可通行-薄表面(地面/坡面) | 70 可通行-空心隧道(门洞) | 40 可通行-其他
+    //  100 障碍-竖直墙/其他 | 90 障碍-不明确
+    void publishProjectionDebug(double origin_x, double origin_y) {
+        const int w = grid_width_ + 1;
+        const int h = grid_height_ + 1;
+        nav_msgs::msg::OccupancyGrid msg;
+        msg.header.frame_id = frame_id_;
+        msg.header.stamp = this->now();
+        msg.info.resolution = resolution_;
+        msg.info.width = w;
+        msg.info.height = h;
+        msg.info.origin.position.x = origin_x;
+        msg.info.origin.position.y = origin_y;
+        msg.info.origin.orientation.w = 1.0;
+        msg.data.resize(static_cast<size_t>(w) * h);
+        const auto& cells = projection_layer_->cells();
+        for (size_t n = 0; n < msg.data.size(); n++) {
+            const CellData& c = cells[n];
+            int8_t v = -1;
+            switch (c.type) {
+                case CellType::FREE:
+                    v = 0;
+                    break;
+                case CellType::PASSABLE:
+                    v = (c.raw_reason == ProjectionClassReason::HOLLOW_TUNNEL) ? 70
+                        : (c.raw_reason == ProjectionClassReason::THIN_SURFACE) ? 20 : 40;
+                    break;
+                case CellType::OCCUPIED:
+                    v = (c.raw_reason == ProjectionClassReason::AMBIGUOUS_OCCUPIED) ? 90 : 100;
+                    break;
+                default:
+                    v = -1;
+                    break;
+            }
+            msg.data[n] = v;
+        }
+        projection_pub_->publish(msg);
     }
 
     // 发布带真实高度的占据体素中心(map系)，范围与2D栅格窗口一致，高度为 [z_min, z_max] 相对雷达。
@@ -467,6 +667,7 @@ private:
     rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr grid_pub_;
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr obstacle_pub_;
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr cloud_3d_pub_;
+    rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr projection_pub_;
     rclcpp::TimerBase::SharedPtr timer_;
     std::unique_ptr<tf2_ros::Buffer> tf_buffer_;
     std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
@@ -492,6 +693,13 @@ private:
     double obstacle_cloud_z_{-0.2};
     int obstacle_sub_n_{1};
     bool publish_cloud_3d_{true};
+    std::unique_ptr<ProjectionLayer> projection_layer_;
+    ProjectionLayerConfig layer_cfg_;
+    bool projection_layer_en_{false};
+    bool projection_use_for_output_{false};
+    double layer_scan_z_min_{-0.25};
+    double layer_scan_z_max_{1.2};
+    int layer_log_counter_{0};
     double cloud_3d_z_min_{-0.9};
     double cloud_3d_z_max_{1.2};
 };

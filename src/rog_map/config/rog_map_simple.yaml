@@ -37,3 +37,30 @@
     cloud_3d_topic: "/rog_map/obstacle_cloud_3d"
     cloud_3d_z_min: -0.25                          # 相对雷达；须在 virtual_ground/ceil 之内
     cloud_3d_z_max: 1.2
+
+    # === ProjectionLayer（按列分析垂直分布，区分 地面 / 墙 / 隧道(门洞)）===
+    # projection_layer_en=true：运行该层并发布调试栅格 /rog_map/projection_grid，不影响 costmap 输出
+    # projection_use_for_output=true：用该层结果替换"固定高度带"逻辑生成 occupancy_grid 和 /rog_map/obstacle_cloud
+    projection_layer_en: true
+    projection_use_for_output: true
+    projection_debug_topic: "/rog_map/projection_grid"
+    # 调试栅格数值: -1未知 0空闲 20可通行-薄表面(地面/坡) 70可通行-空心隧道(门洞) 40可通行-其他 100障碍 90障碍-不明确
+    layer_scan_z_min: -0.25                       # 扫描高度范围，相对雷达；暂取与 cloud_3d 相同，换车/确定地面高度后需重新标定
+    layer_scan_z_max: 1.2
+    # 以下分类阈值为 classifyCell 代码里的默认值，未针对本场地标定，需实测
+    layer_unknown_as_occupied: false
+    layer_min_observed_voxels: 2
+    layer_surface_height_delta_max: 0.10          # 占据 z 跨度不超过此值 -> 薄表面(可通行)
+    layer_wall_height_delta_min: 0.20             # 跨度不小于此值且占据率够高 -> 竖直墙(障碍)
+    layer_wall_occupancy_ratio_min: 0.80
+    layer_tunnel_height_delta_min: 0.24           # 跨度在 [min,max] 且占据率不高 -> 空心隧道(可通行)
+    layer_tunnel_height_delta_max: 0.40
+    layer_tunnel_occupancy_ratio_max: 0.55
+    layer_passable_as_free: true
+    layer_passable_cost: 50
+    layer_hysteresis_en: true
+    layer_hysteresis_count: 2
+    layer_obstacle_hold_time: 0.0
+    layer_mask_filter_en: true
+    layer_fill_occ_min: 5
+    layer_denoise_occ_max: 0
